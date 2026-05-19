@@ -50,6 +50,7 @@ from ..schema.schema import (
     SchemaVersion1Dot5,
     SchemaVersion1Dot6,
     SchemaVersion1Dot7,
+    SchemaVersion1Dot8,
 )
 from ..serialization import PackageUrl as PackageUrlSH
 from . import (
@@ -228,6 +229,7 @@ class _ComponentScopeSerializationHelper(serializable.helpers.BaseHelper):
     __CASES[SchemaVersion1Dot5] = __CASES[SchemaVersion1Dot4]
     __CASES[SchemaVersion1Dot6] = __CASES[SchemaVersion1Dot5]
     __CASES[SchemaVersion1Dot7] = __CASES[SchemaVersion1Dot6]
+    __CASES[SchemaVersion1Dot8] = __CASES[SchemaVersion1Dot7]
 
     @classmethod
     def __normalize(cls, cs: ComponentScope, view: type[serializable.ViewType]) -> Optional[str]:
@@ -308,6 +310,7 @@ class _ComponentTypeSerializationHelper(serializable.helpers.BaseHelper):
         ComponentType.CRYPTOGRAPHIC_ASSET,
     }
     __CASES[SchemaVersion1Dot7] = __CASES[SchemaVersion1Dot6]
+    __CASES[SchemaVersion1Dot8] = __CASES[SchemaVersion1Dot7]
 
     @classmethod
     def __normalize(cls, ct: ComponentType, view: type[serializable.ViewType]) -> Optional[str]:
@@ -617,6 +620,7 @@ class Pedigree:
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_array(serializable.XmlArraySerializationType.NESTED, 'patch')
     @serializable.xml_sequence(5)
     def patches(self) -> 'SortedSet[Patch]':
@@ -1012,6 +1016,7 @@ class Component(Dependable):
         swhids: Optional[Iterable[Swhid]] = None,
         crypto_properties: Optional[CryptoProperties] = None,
         tags: Optional[Iterable[str]] = None,
+        trust_zone: Optional[str] = None,
         # Deprecated in v1.6
         author: Optional[str] = None,
     ) -> None:
@@ -1042,6 +1047,7 @@ class Component(Dependable):
         self.release_notes = release_notes
         self.crypto_properties = crypto_properties
         self.tags = tags or []
+        self.trust_zone = trust_zone
         # spec-deprecated properties below
         self.author = author
         self.modified = modified
@@ -1092,6 +1098,7 @@ class Component(Dependable):
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_attribute()
     @serializable.xml_name('bom-ref')
     def bom_ref(self) -> BomRef:
@@ -1111,6 +1118,7 @@ class Component(Dependable):
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_sequence(1)
     def supplier(self) -> Optional[OrganizationalEntity]:
         """
@@ -1129,6 +1137,7 @@ class Component(Dependable):
     @property
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_sequence(2)
     def manufacturer(self) -> Optional[OrganizationalEntity]:
         """
@@ -1148,6 +1157,7 @@ class Component(Dependable):
     @property
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_array(serializable.XmlArraySerializationType.NESTED, 'author')
     @serializable.xml_sequence(3)
     def authors(self) -> 'SortedSet[OrganizationalContact]':
@@ -1172,6 +1182,7 @@ class Component(Dependable):
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_sequence(4)
     @serializable.xml_string(serializable.XmlStringSerializationType.NORMALIZED_STRING)
     def author(self) -> Optional[str]:
@@ -1328,6 +1339,7 @@ class Component(Dependable):
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.type_mapping(_LicenseRepositorySerializationHelper)
     @serializable.xml_sequence(12)
     def licenses(self) -> LicenseRepository:
@@ -1399,6 +1411,7 @@ class Component(Dependable):
     @serializable.json_name('omniborId')
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_array(serializable.XmlArraySerializationType.FLAT, child_name='omniborId')
     @serializable.xml_sequence(16)
     def omnibor_ids(self) -> 'SortedSet[OmniborId]':
@@ -1420,6 +1433,7 @@ class Component(Dependable):
     @serializable.json_name('swhid')
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_array(serializable.XmlArraySerializationType.FLAT, child_name='swhid')
     @serializable.xml_sequence(17)
     def swhids(self) -> 'SortedSet[Swhid]':
@@ -1444,6 +1458,7 @@ class Component(Dependable):
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_sequence(18)
     def swid(self) -> Optional[Swid]:
         """
@@ -1478,6 +1493,7 @@ class Component(Dependable):
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_sequence(20)
     def pedigree(self) -> Optional[Pedigree]:
         """
@@ -1501,6 +1517,7 @@ class Component(Dependable):
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_array(serializable.XmlArraySerializationType.NESTED, 'reference')
     @serializable.xml_sequence(21)
     def external_references(self) -> 'SortedSet[ExternalReference]':
@@ -1523,6 +1540,7 @@ class Component(Dependable):
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_array(serializable.XmlArraySerializationType.NESTED, 'property')
     @serializable.xml_sequence(22)
     def properties(self) -> 'SortedSet[Property]':
@@ -1563,6 +1581,7 @@ class Component(Dependable):
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_sequence(24)
     @serializable.type_mapping(_ComponentEvidenceSerializationHelper)
     def evidence(self) -> Optional[ComponentEvidence]:
@@ -1583,6 +1602,7 @@ class Component(Dependable):
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_sequence(25)
     def release_notes(self) -> Optional[ReleaseNotes]:
         """
@@ -1622,6 +1642,7 @@ class Component(Dependable):
     @property
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_sequence(30)
     def crypto_properties(self) -> Optional[CryptoProperties]:
         """
@@ -1643,6 +1664,7 @@ class Component(Dependable):
     @property
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_array(serializable.XmlArraySerializationType.NESTED, 'tag')
     @serializable.xml_sequence(31)
     def tags(self) -> 'SortedSet[str]':
@@ -1658,6 +1680,24 @@ class Component(Dependable):
     @tags.setter
     def tags(self, tags: Iterable[str]) -> None:
         self._tags = SortedSet(tags)
+
+    @property
+    @serializable.view(SchemaVersion1Dot8)
+    @serializable.xml_sequence(32)
+    @serializable.xml_string(serializable.XmlStringSerializationType.NORMALIZED_STRING)
+    def trust_zone(self) -> Optional[str]:
+        """
+        The name of the trust zone the component resides in. See AIBOM System Structure
+        specification, sections 4.1 and 5.
+
+        Returns:
+            `str` if set else `None`
+        """
+        return self._trust_zone
+
+    @trust_zone.setter
+    def trust_zone(self, trust_zone: Optional[str]) -> None:
+        self._trust_zone = trust_zone
 
     def get_all_nested_components(self, include_self: bool = False) -> set['Component']:
         components = set()
@@ -1690,6 +1730,7 @@ class Component(Dependable):
             _ComparableTuple(self.components), self.evidence, self.release_notes, self.modified,
             _ComparableTuple(self.authors), _ComparableTuple(self.omnibor_ids), self.manufacturer,
             self.crypto_properties, _ComparableTuple(self.tags),
+            self.trust_zone,
         ))
 
     def __eq__(self, other: object) -> bool:

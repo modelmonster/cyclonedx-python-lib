@@ -35,7 +35,7 @@ from sortedcontainers import SortedSet
 
 from .._internal.compare import ComparableTuple as _ComparableTuple
 from ..exception.model import InvalidNistQuantumSecurityLevelException, InvalidRelatedCryptoMaterialSizeException
-from ..schema.schema import SchemaVersion1Dot6, SchemaVersion1Dot7
+from ..schema.schema import SchemaVersion1Dot6, SchemaVersion1Dot7, SchemaVersion1Dot8
 from .bom_ref import BomRef
 
 
@@ -395,6 +395,7 @@ class AlgorithmProperties:
     @serializable.json_name('certificationLevel')
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_array(serializable.XmlArraySerializationType.FLAT, child_name='certificationLevel')
     @serializable.xml_sequence(5)
     def certification_levels(self) -> 'SortedSet[CryptoCertificationLevel]':

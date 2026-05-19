@@ -30,6 +30,7 @@ from .. import SchemaVersion
 __DIR = dirname(__file__)
 
 BOM_XML: dict[SchemaVersion, Optional[str]] = {
+    SchemaVersion.V1_8: join(__DIR, 'bom-1.8-aibom.SNAPSHOT.xsd'),
     SchemaVersion.V1_7: join(__DIR, 'bom-1.7.SNAPSHOT.xsd'),
     SchemaVersion.V1_6: join(__DIR, 'bom-1.6.SNAPSHOT.xsd'),
     SchemaVersion.V1_5: join(__DIR, 'bom-1.5.SNAPSHOT.xsd'),
@@ -41,6 +42,7 @@ BOM_XML: dict[SchemaVersion, Optional[str]] = {
 }
 
 BOM_JSON: dict[SchemaVersion, Optional[str]] = {
+    SchemaVersion.V1_8: join(__DIR, 'bom-1.8-aibom.SNAPSHOT.schema.json'),
     SchemaVersion.V1_7: join(__DIR, 'bom-1.7.SNAPSHOT.schema.json'),
     SchemaVersion.V1_6: join(__DIR, 'bom-1.6.SNAPSHOT.schema.json'),
     SchemaVersion.V1_5: join(__DIR, 'bom-1.5.SNAPSHOT.schema.json'),
@@ -53,6 +55,7 @@ BOM_JSON: dict[SchemaVersion, Optional[str]] = {
 }
 
 BOM_JSON_STRICT: dict[SchemaVersion, Optional[str]] = {
+    SchemaVersion.V1_8: BOM_JSON[SchemaVersion.V1_8],
     SchemaVersion.V1_7: BOM_JSON[SchemaVersion.V1_7],
     SchemaVersion.V1_6: BOM_JSON[SchemaVersion.V1_6],
     SchemaVersion.V1_5: BOM_JSON[SchemaVersion.V1_5],

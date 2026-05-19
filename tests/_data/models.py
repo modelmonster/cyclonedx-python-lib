@@ -367,6 +367,72 @@ def get_component_crypto_asset_related_material(
     )
 
 
+def get_bom_v1_8_with_aibom_system_structure() -> Bom:
+    from cyclonedx.model.aibom import DataFlowEdge, DataFlowOperation, TrustZone
+    user_input = Service(
+        name='user-input',
+        bom_ref='user-input',
+        endpoints=[XsUri('https://support.example.com/chat')],
+        x_trust_boundary=True,
+        trust_zone='public-internet',
+        data=[DataClassification(flow=DataFlow.OUTBOUND, classification='PII', bom_ref='data-user-pii')],
+    )
+    knowledge_base = Service(
+        name='knowledge-base',
+        bom_ref='knowledge-base',
+        endpoints=[XsUri('https://kb.internal:6333')],
+        trust_zone='internal-vpc',
+        data=[DataClassification(flow=DataFlow.OUTBOUND, classification='PIFI', bom_ref='data-kb-pifi')],
+    )
+    input_filter = Component(
+        type=ComponentType.APPLICATION,
+        name='Input Safety Filter',
+        bom_ref='input-filter',
+        trust_zone='internal-vpc',
+    )
+    llm = Component(
+        type=ComponentType.MACHINE_LEARNING_MODEL,
+        name='Claude Sonnet',
+        bom_ref='claude-sonnet',
+        trust_zone='public-internet',
+    )
+    return _make_bom(
+        components=[input_filter, llm],
+        services=[user_input, knowledge_base],
+        trust_zones=[
+            TrustZone(name='public-internet', description='Untrusted external network'),
+            TrustZone(name='internal-vpc', description='Private cloud network', default=True),
+        ],
+        data_flows=[
+            DataFlowEdge(
+                bom_ref='df-user-to-filter',
+                source='user-input', target='input-filter',
+                operations=[DataFlowOperation.READ],
+                data_ref='data-user-pii',
+                name='User message to input filter',
+            ),
+            DataFlowEdge(
+                bom_ref='df-filter-to-llm',
+                source='input-filter', target='claude-sonnet',
+                name='Filtered input to LLM',
+            ),
+            DataFlowEdge(
+                bom_ref='df-llm-to-kb',
+                source='claude-sonnet', target='knowledge-base',
+                operations=[DataFlowOperation.WRITE, DataFlowOperation.EXECUTE],
+                name='Retrieval request',
+            ),
+            DataFlowEdge(
+                bom_ref='df-kb-to-llm',
+                source='knowledge-base', target='claude-sonnet',
+                operations=[DataFlowOperation.READ],
+                data_ref='data-kb-pifi',
+                name='Knowledge base results',
+            ),
+        ],
+    )
+
+
 def get_bom_v1_6_with_crypto_algorithm() -> Bom:
     c = get_component_crypto_asset_algorithm()
     b = _make_bom(components=[c])
@@ -1618,4 +1684,5 @@ all_get_bom_funct_with_incomplete_deps = {
     get_bom_with_distribution_constraints,
     get_bom_with_definitions_standards,
     get_bom_with_definitions_and_detailed_standards,
+    get_bom_v1_8_with_aibom_system_structure,
 }

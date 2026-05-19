@@ -40,9 +40,11 @@ from ..schema.schema import (
     SchemaVersion1Dot5,
     SchemaVersion1Dot6,
     SchemaVersion1Dot7,
+    SchemaVersion1Dot8,
 )
 from ..serialization import UrnUuidHelper
 from . import _BOM_LINK_PREFIX, ExternalReference, Property
+from .aibom import DataFlowEdge, TrustZone
 from .bom_ref import BomRef
 from .component import Component
 from .contact import OrganizationalContact, OrganizationalEntity
@@ -190,6 +192,7 @@ class BomMetaData:
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.type_mapping(_LifecycleRepositoryHelper)
     @serializable.xml_sequence(2)
     def lifecycles(self) -> LifecycleRepository:
@@ -275,6 +278,7 @@ class BomMetaData:
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_sequence(6)
     def manufacture(self) -> Optional[OrganizationalEntity]:
         """
@@ -298,6 +302,7 @@ class BomMetaData:
     @property
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_sequence(7)
     def manufacturer(self) -> Optional[OrganizationalEntity]:
         """
@@ -337,6 +342,7 @@ class BomMetaData:
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.type_mapping(_LicenseRepositorySerializationHelper)
     @serializable.xml_sequence(9)
     def licenses(self) -> LicenseRepository:
@@ -358,6 +364,7 @@ class BomMetaData:
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_array(serializable.XmlArraySerializationType.NESTED, 'property')
     @serializable.xml_sequence(10)
     def properties(self) -> 'SortedSet[Property]':
@@ -379,6 +386,7 @@ class BomMetaData:
 
     @property
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_sequence(11)
     def distribution_constraints(self) -> Optional[DistributionConstraints]:
         """
@@ -444,6 +452,8 @@ class Bom:
         vulnerabilities: Optional[Iterable[Vulnerability]] = None,
         properties: Optional[Iterable[Property]] = None,
         definitions: Optional[Definitions] = None,
+        trust_zones: Optional[Iterable['TrustZone']] = None,
+        data_flows: Optional[Iterable['DataFlowEdge']] = None,
     ) -> None:
         """
         Create a new Bom that you can manually/programmatically add data to later.
@@ -456,6 +466,8 @@ class Bom:
         self.metadata = metadata or BomMetaData()
         self.components = components or []
         self.services = services or []
+        self.trust_zones = trust_zones or []
+        self.data_flows = data_flows or []
         self.external_references = external_references or []
         self.vulnerabilities = vulnerabilities or []
         self.dependencies = dependencies or []
@@ -471,6 +483,7 @@ class Bom:
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_attribute()
     def serial_number(self) -> UUID:
         """
@@ -502,6 +515,7 @@ class Bom:
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_sequence(10)
     def metadata(self) -> BomMetaData:
         """
@@ -544,6 +558,7 @@ class Bom:
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_array(serializable.XmlArraySerializationType.NESTED, 'service')
     @serializable.xml_sequence(30)
     def services(self) -> 'SortedSet[Service]':
@@ -560,6 +575,46 @@ class Bom:
         self._services = SortedSet(services)
 
     @property
+    @serializable.view(SchemaVersion1Dot8)
+    @serializable.xml_array(serializable.XmlArraySerializationType.NESTED, 'trustZone')
+    @serializable.xml_sequence(35)
+    def trust_zones(self) -> 'SortedSet[TrustZone]':
+        """
+        Definitions of named trust zones (environments or boundaries) referenced by graph nodes.
+        Available from CycloneDX 1.8.
+
+        See AIBOM System Structure specification, section 5.
+
+        Returns:
+            Set of `TrustZone`
+        """
+        return self._trust_zones
+
+    @trust_zones.setter
+    def trust_zones(self, trust_zones: Iterable['TrustZone']) -> None:
+        self._trust_zones = SortedSet(trust_zones)
+
+    @property
+    @serializable.view(SchemaVersion1Dot8)
+    @serializable.xml_array(serializable.XmlArraySerializationType.NESTED, 'dataFlow')
+    @serializable.xml_sequence(36)
+    def data_flows(self) -> 'SortedSet[DataFlowEdge]':
+        """
+        Directed edges in the system structure graph, representing data movement between
+        identified component or service nodes. Available from CycloneDX 1.8.
+
+        See AIBOM System Structure specification, section 6.
+
+        Returns:
+            Set of `DataFlowEdge`
+        """
+        return self._data_flows
+
+    @data_flows.setter
+    def data_flows(self, data_flows: Iterable['DataFlowEdge']) -> None:
+        self._data_flows = SortedSet(data_flows)
+
+    @property
     @serializable.view(SchemaVersion1Dot1)
     @serializable.view(SchemaVersion1Dot2)
     @serializable.view(SchemaVersion1Dot3)
@@ -567,6 +622,7 @@ class Bom:
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_array(serializable.XmlArraySerializationType.NESTED, 'reference')
     @serializable.xml_sequence(40)
     def external_references(self) -> 'SortedSet[ExternalReference]':
@@ -589,6 +645,7 @@ class Bom:
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_array(serializable.XmlArraySerializationType.NESTED, 'dependency')
     @serializable.xml_sequence(50)
     def dependencies(self) -> 'SortedSet[Dependency]':
@@ -617,6 +674,7 @@ class Bom:
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_array(serializable.XmlArraySerializationType.NESTED, 'property')
     @serializable.xml_sequence(70)
     def properties(self) -> 'SortedSet[Property]':
@@ -640,6 +698,7 @@ class Bom:
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_array(serializable.XmlArraySerializationType.NESTED, 'vulnerability')
     @serializable.xml_sequence(80)
     def vulnerabilities(self) -> 'SortedSet[Vulnerability]':
@@ -680,6 +739,7 @@ class Bom:
     @property
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_sequence(110)
     def definitions(self) -> Optional[Definitions]:
         """
@@ -872,6 +932,7 @@ class Bom:
             _ComparableTuple(self.external_references), _ComparableTuple(
                 self.dependencies), _ComparableTuple(self.properties),
             _ComparableTuple(self.vulnerabilities),
+            _ComparableTuple(self.trust_zones), _ComparableTuple(self.data_flows),
         ))
 
     def __eq__(self, other: object) -> bool:

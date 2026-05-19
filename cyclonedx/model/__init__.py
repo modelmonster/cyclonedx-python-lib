@@ -55,6 +55,7 @@ from ..schema.schema import (
     SchemaVersion1Dot5,
     SchemaVersion1Dot6,
     SchemaVersion1Dot7,
+    SchemaVersion1Dot8,
 )
 from .bom_ref import BomRef
 
@@ -92,9 +93,32 @@ class DataClassification:
         self, *,
         flow: DataFlow,
         classification: str,
+        bom_ref: Optional[Union[str, BomRef]] = None,
     ) -> None:
         self.flow = flow
         self.classification = classification
+        if isinstance(bom_ref, BomRef):
+            self._bom_ref: Optional[BomRef] = bom_ref
+        elif bom_ref:
+            self._bom_ref = BomRef(value=str(bom_ref))
+        else:
+            self._bom_ref = None
+
+    @property
+    @serializable.json_name('bom-ref')
+    @serializable.type_mapping(BomRef)
+    @serializable.view(SchemaVersion1Dot8)
+    @serializable.xml_attribute()
+    @serializable.xml_name('bom-ref')
+    def bom_ref(self) -> Optional[BomRef]:
+        """
+        An optional identifier for this data descriptor. AIBOM `dataFlows[].dataRef` uses this `bom-ref`
+        to reference the specific payload moving on an edge. Available from CycloneDX 1.8.
+
+        Returns:
+            `BomRef` if set else `None`
+        """
+        return self._bom_ref
 
     @property
     @serializable.xml_attribute()
@@ -138,7 +162,8 @@ class DataClassification:
 
     def __comparable_tuple(self) -> _ComparableTuple:
         return _ComparableTuple((
-            self.flow, self.classification
+            self.flow, self.classification,
+            self._bom_ref.value if self._bom_ref is not None else None,
         ))
 
     def __eq__(self, other: object) -> bool:
@@ -316,6 +341,7 @@ class _HashTypeRepositorySerializationHelper(serializable.helpers.BaseHelper):
         HashAlgorithm.STREEBOG_256,
         HashAlgorithm.STREEBOG_512,
     }
+    __CASES[SchemaVersion1Dot8] = __CASES[SchemaVersion1Dot7]
 
     @classmethod
     def __prep(cls, hts: Iterable['HashType'], view: type[serializable.ViewType]) -> Generator['HashType', None, None]:
@@ -594,6 +620,7 @@ class _ExternalReferenceSerializationHelper(serializable.helpers.BaseHelper):
         ExternalReferenceType.PATENT_ASSERTION,
         ExternalReferenceType.PATENT_FAMILY,
     }
+    __CASES[SchemaVersion1Dot8] = __CASES[SchemaVersion1Dot7]
 
     @classmethod
     def __normalize(cls, extref: ExternalReferenceType, view: type[serializable.ViewType]) -> str:
@@ -826,6 +853,7 @@ class ExternalReference:
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.type_mapping(_HashTypeRepositorySerializationHelper)
     def hashes(self) -> 'SortedSet[HashType]':
         """
@@ -842,6 +870,7 @@ class ExternalReference:
 
     @property
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_array(serializable.XmlArraySerializationType.NESTED, 'property')
     def properties(self) -> 'SortedSet[Property]':
         """

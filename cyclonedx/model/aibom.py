@@ -1,0 +1,396 @@
+# This file is part of CycloneDX Python Library
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OWASP Foundation. All Rights Reserved.
+
+
+"""
+AIBOM System Structure model types.
+
+Implements the typed object model for the AIBOM System Structure specification
+(see ``docs/specs/aibom-system-structure-proposal.md``). The native fields are
+gated to ``SchemaVersion.V1_8`` only.
+"""
+
+from collections.abc import Iterable
+from enum import Enum
+from typing import TYPE_CHECKING, Any, Optional, Union
+
+import py_serializable as serializable
+from sortedcontainers import SortedSet
+
+from .._internal.bom_ref import bom_ref_from_str as _bom_ref_from_str
+from .._internal.compare import ComparableTuple as _ComparableTuple
+from . import Property
+from .bom_ref import BomRef
+
+if TYPE_CHECKING:  # pragma: no cover
+    pass
+
+
+class _XsdBoolean(serializable.helpers.BaseHelper):
+    """  THIS CLASS IS NON-PUBLIC API
+
+    Serializes :class:`bool`:
+
+    * In JSON, keeps the native ``true`` / ``false`` literal.
+    * In XML, emits the ``xs:boolean`` lexical space ``"true"`` / ``"false"``,
+      because :func:`str` on a Python :class:`bool` would otherwise produce
+      ``"True"`` / ``"False"``, which is not a valid ``xs:boolean`` value.
+    """
+
+    @classmethod
+    def json_serialize(cls, o: Any) -> Optional[bool]:
+        if o is None:
+            return None
+        if isinstance(o, bool):
+            return o
+        raise ValueError(f'Attempt to serialize a non-bool as xs:boolean: {o.__class__}')
+
+    @classmethod
+    def json_deserialize(cls, o: Any) -> Optional[bool]:
+        return cls._deserialize(o)
+
+    @classmethod
+    def xml_serialize(cls, o: Any) -> Optional[str]:
+        if o is None:
+            return None
+        if isinstance(o, bool):
+            return 'true' if o else 'false'
+        raise ValueError(f'Attempt to serialize a non-bool as xs:boolean: {o.__class__}')
+
+    @classmethod
+    def xml_deserialize(cls, o: Any) -> Optional[bool]:
+        return cls._deserialize(o)
+
+    @staticmethod
+    def _deserialize(o: Any) -> Optional[bool]:
+        if o is None:
+            return None
+        if isinstance(o, bool):
+            return o
+        if isinstance(o, str):
+            v = o.strip().lower()
+            if v in ('true', '1'):
+                return True
+            if v in ('false', '0'):
+                return False
+        raise ValueError(f'Cannot deserialize xs:boolean from: {o!r}')
+
+
+@serializable.serializable_enum
+class DataFlowOperation(str, Enum):
+    """
+    Operation type for an AIBOM dataflow edge.
+
+    See AIBOM System Structure specification, section 6.4.
+    """
+    READ = 'read'
+    WRITE = 'write'
+    EXECUTE = 'execute'
+    DELETE = 'delete'
+
+
+@serializable.serializable_class
+class TrustZone:
+    """
+    A named environment or security boundary referenced by AIBOM graph nodes.
+
+    See AIBOM System Structure specification, section 5.
+    """
+
+    def __init__(
+        self, *,
+        name: str,
+        description: Optional[str] = None,
+        default: Optional[bool] = None,
+    ) -> None:
+        if not name:
+            raise ValueError('TrustZone.name must be a non-empty string')
+        self.name = name
+        self.description = description
+        self.default = default
+
+    @property
+    @serializable.xml_sequence(1)
+    @serializable.xml_string(serializable.XmlStringSerializationType.NORMALIZED_STRING)
+    def name(self) -> str:
+        """
+        The name of the trust zone, referenced by `trustZone` on components and services.
+
+        Returns:
+            `str`
+        """
+        return self._name
+
+    @name.setter
+    def name(self, name: str) -> None:
+        self._name = name
+
+    @property
+    @serializable.xml_sequence(2)
+    @serializable.xml_string(serializable.XmlStringSerializationType.NORMALIZED_STRING)
+    def description(self) -> Optional[str]:
+        """
+        A short description of the trust zone.
+
+        Returns:
+            `str` if set else `None`
+        """
+        return self._description
+
+    @description.setter
+    def description(self, description: Optional[str]) -> None:
+        self._description = description
+
+    @property
+    @serializable.type_mapping(_XsdBoolean)
+    @serializable.xml_attribute()
+    def default(self) -> Optional[bool]:
+        """
+        When true, this trust zone applies to graph nodes that do not declare their own ``trustZone``.
+        At most one trust zone entry per BOM may set ``default`` to true.
+
+        Returns:
+            `bool` if set else `None`
+        """
+        return self._default
+
+    @default.setter
+    def default(self, default: Optional[bool]) -> None:
+        self._default = default
+
+    def __comparable_tuple(self) -> _ComparableTuple:
+        return _ComparableTuple((
+            self.name, self.description, self.default,
+        ))
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, TrustZone):
+            return self.__comparable_tuple() == other.__comparable_tuple()
+        return False
+
+    def __lt__(self, other: Any) -> bool:
+        if isinstance(other, TrustZone):
+            return self.__comparable_tuple() < other.__comparable_tuple()
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self.__comparable_tuple())
+
+    def __repr__(self) -> str:
+        return f'<TrustZone name={self.name!r}, default={self.default}>'
+
+
+@serializable.serializable_class
+class DataFlowEdge:
+    """
+    A directed edge in the AIBOM system structure graph, representing data movement
+    from a source node to a target node.
+
+    See AIBOM System Structure specification, section 6.
+
+    ``source`` and ``target`` SHALL always define the direction of actual data
+    movement. ``operations`` annotate the interaction context but never reverse
+    or override edge direction.
+    """
+
+    def __init__(
+        self, *,
+        bom_ref: Union[str, BomRef],
+        source: Union[str, BomRef],
+        target: Union[str, BomRef],
+        operations: Optional[Iterable[DataFlowOperation]] = None,
+        data_ref: Optional[Union[str, BomRef]] = None,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        properties: Optional[Iterable[Property]] = None,
+    ) -> None:
+        self._bom_ref = self._require_ref('bom_ref', bom_ref)
+        self._source = self._require_ref('source', source)
+        self._target = self._require_ref('target', target)
+        self.operations = operations or []
+        self.data_ref = data_ref
+        self.name = name
+        self.description = description
+        self.properties = properties or []
+
+    @staticmethod
+    def _require_ref(field: str, value: Union[str, BomRef]) -> BomRef:
+        if isinstance(value, BomRef):
+            if not value.value:
+                raise ValueError(f'DataFlowEdge.{field} must be a non-empty BomRef')
+            return value
+        if not value:
+            raise ValueError(f'DataFlowEdge.{field} must be a non-empty string or BomRef')
+        return BomRef(value=str(value))
+
+    @property
+    @serializable.json_name('bom-ref')
+    @serializable.type_mapping(BomRef)
+    @serializable.xml_attribute()
+    @serializable.xml_name('bom-ref')
+    def bom_ref(self) -> BomRef:
+        """
+        Unique identifier for this dataflow edge. Required.
+
+        Returns:
+            `BomRef`
+        """
+        return self._bom_ref
+
+    @property
+    @serializable.type_mapping(BomRef)
+    @serializable.xml_sequence(1)
+    def source(self) -> BomRef:
+        """
+        BOM reference of the source node — the component or service from which data moves.
+
+        Returns:
+            `BomRef`
+        """
+        return self._source
+
+    @source.setter
+    def source(self, source: Union[str, BomRef]) -> None:
+        self._source = self._require_ref('source', source)
+
+    @property
+    @serializable.type_mapping(BomRef)
+    @serializable.xml_sequence(2)
+    def target(self) -> BomRef:
+        """
+        BOM reference of the target node — the component or service to which data moves.
+
+        Returns:
+            `BomRef`
+        """
+        return self._target
+
+    @target.setter
+    def target(self, target: Union[str, BomRef]) -> None:
+        self._target = self._require_ref('target', target)
+
+    @property
+    @serializable.xml_array(serializable.XmlArraySerializationType.NESTED, 'operation')
+    @serializable.xml_sequence(3)
+    def operations(self) -> 'SortedSet[DataFlowOperation]':
+        """
+        Operation types annotating the interaction context. Operations never determine,
+        reverse, or override edge direction.
+
+        Returns:
+            Set of `DataFlowOperation`
+        """
+        return self._operations
+
+    @operations.setter
+    def operations(self, operations: Iterable[DataFlowOperation]) -> None:
+        self._operations = SortedSet(operations)
+
+    @property
+    @serializable.json_name('dataRef')
+    @serializable.type_mapping(BomRef)
+    @serializable.xml_name('dataRef')
+    @serializable.xml_sequence(4)
+    def data_ref(self) -> Optional[BomRef]:
+        """
+        BOM reference of a data descriptor for the payload on this edge. Resolves
+        to a `serviceData.bom-ref` on either endpoint. Omitted when no specific
+        descriptor applies.
+
+        Returns:
+            `BomRef` if set else `None`
+        """
+        return self._data_ref
+
+    @data_ref.setter
+    def data_ref(self, data_ref: Optional[Union[str, BomRef]]) -> None:
+        self._data_ref = _bom_ref_from_str(data_ref, optional=True)
+
+    @property
+    @serializable.xml_sequence(5)
+    @serializable.xml_string(serializable.XmlStringSerializationType.NORMALIZED_STRING)
+    def name(self) -> Optional[str]:
+        """
+        Human-readable label for this dataflow.
+
+        Returns:
+            `str` if set else `None`
+        """
+        return self._name
+
+    @name.setter
+    def name(self, name: Optional[str]) -> None:
+        self._name = name
+
+    @property
+    @serializable.xml_sequence(6)
+    @serializable.xml_string(serializable.XmlStringSerializationType.NORMALIZED_STRING)
+    def description(self) -> Optional[str]:
+        """
+        Description of what data moves on this edge.
+
+        Returns:
+            `str` if set else `None`
+        """
+        return self._description
+
+    @description.setter
+    def description(self, description: Optional[str]) -> None:
+        self._description = description
+
+    @property
+    @serializable.xml_array(serializable.XmlArraySerializationType.NESTED, 'property')
+    @serializable.xml_sequence(7)
+    def properties(self) -> 'SortedSet[Property]':
+        """
+        Extension properties for this dataflow edge.
+
+        Returns:
+            Set of `Property`
+        """
+        return self._properties
+
+    @properties.setter
+    def properties(self, properties: Iterable[Property]) -> None:
+        self._properties = SortedSet(properties)
+
+    def __comparable_tuple(self) -> _ComparableTuple:
+        return _ComparableTuple((
+            self._bom_ref.value,
+            self._source.value,
+            self._target.value,
+            _ComparableTuple(self._operations),
+            self._data_ref.value if self._data_ref is not None else None,
+            self.name, self.description,
+            _ComparableTuple(self._properties),
+        ))
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, DataFlowEdge):
+            return self.__comparable_tuple() == other.__comparable_tuple()
+        return False
+
+    def __lt__(self, other: Any) -> bool:
+        if isinstance(other, DataFlowEdge):
+            return self.__comparable_tuple() < other.__comparable_tuple()
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self.__comparable_tuple())
+
+    def __repr__(self) -> str:
+        return f'<DataFlowEdge bom-ref={self._bom_ref.value!r}, {self._source.value!r} -> {self._target.value!r}>'

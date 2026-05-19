@@ -28,7 +28,13 @@ from sortedcontainers import SortedSet
 from .._internal.compare import ComparableTuple as _ComparableTuple
 from ..schema import SchemaVersion
 from ..schema.deprecation import SchemaDeprecationWarning1Dot5
-from ..schema.schema import SchemaVersion1Dot4, SchemaVersion1Dot5, SchemaVersion1Dot6, SchemaVersion1Dot7
+from ..schema.schema import (
+    SchemaVersion1Dot4,
+    SchemaVersion1Dot5,
+    SchemaVersion1Dot6,
+    SchemaVersion1Dot7,
+    SchemaVersion1Dot8,
+)
 from . import ExternalReference, HashType, _HashTypeRepositorySerializationHelper
 from .component import Component
 from .service import Service
@@ -134,6 +140,7 @@ class Tool:
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_array(serializable.XmlArraySerializationType.NESTED, 'reference')
     @serializable.xml_sequence(5)
     def external_references(self) -> 'SortedSet[ExternalReference]':

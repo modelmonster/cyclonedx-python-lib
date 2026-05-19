@@ -1,0 +1,130 @@
+{
+  "components": [
+    {
+      "bom-ref": "input-filter",
+      "name": "Input Safety Filter",
+      "trustZone": "internal-vpc",
+      "type": "application"
+    },
+    {
+      "bom-ref": "claude-sonnet",
+      "name": "Claude Sonnet",
+      "trustZone": "public-internet",
+      "type": "machine-learning-model"
+    }
+  ],
+  "dataFlows": [
+    {
+      "bom-ref": "df-filter-to-llm",
+      "name": "Filtered input to LLM",
+      "source": "input-filter",
+      "target": "claude-sonnet"
+    },
+    {
+      "bom-ref": "df-kb-to-llm",
+      "dataRef": "data-kb-pifi",
+      "name": "Knowledge base results",
+      "operations": [
+        "read"
+      ],
+      "source": "knowledge-base",
+      "target": "claude-sonnet"
+    },
+    {
+      "bom-ref": "df-llm-to-kb",
+      "name": "Retrieval request",
+      "operations": [
+        "execute",
+        "write"
+      ],
+      "source": "claude-sonnet",
+      "target": "knowledge-base"
+    },
+    {
+      "bom-ref": "df-user-to-filter",
+      "dataRef": "data-user-pii",
+      "name": "User message to input filter",
+      "operations": [
+        "read"
+      ],
+      "source": "user-input",
+      "target": "input-filter"
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "claude-sonnet"
+    },
+    {
+      "ref": "input-filter"
+    },
+    {
+      "ref": "knowledge-base"
+    },
+    {
+      "ref": "user-input"
+    }
+  ],
+  "metadata": {
+    "timestamp": "2023-01-07T13:44:32.312678+00:00"
+  },
+  "properties": [
+    {
+      "name": "key1",
+      "value": "val1"
+    },
+    {
+      "name": "key2",
+      "value": "val2"
+    }
+  ],
+  "serialNumber": "urn:uuid:1441d33a-e0fc-45b5-af3b-61ee52a88bac",
+  "services": [
+    {
+      "bom-ref": "knowledge-base",
+      "data": [
+        {
+          "bom-ref": "data-kb-pifi",
+          "classification": "PIFI",
+          "flow": "outbound"
+        }
+      ],
+      "endpoints": [
+        "https://kb.internal:6333"
+      ],
+      "name": "knowledge-base",
+      "trustZone": "internal-vpc"
+    },
+    {
+      "bom-ref": "user-input",
+      "data": [
+        {
+          "bom-ref": "data-user-pii",
+          "classification": "PII",
+          "flow": "outbound"
+        }
+      ],
+      "endpoints": [
+        "https://support.example.com/chat"
+      ],
+      "name": "user-input",
+      "trustZone": "public-internet",
+      "x-trust-boundary": true
+    }
+  ],
+  "trustZones": [
+    {
+      "default": true,
+      "description": "Private cloud network",
+      "name": "internal-vpc"
+    },
+    {
+      "description": "Untrusted external network",
+      "name": "public-internet"
+    }
+  ],
+  "version": 1,
+  "$schema": "http://cyclonedx.org/schema/bom-1.8.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.8"
+}

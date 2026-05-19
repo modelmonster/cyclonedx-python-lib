@@ -33,7 +33,7 @@ from tests._data.models import (
     all_get_bom_funct_with_incomplete_deps,
 )
 
-_LATEST_SCHEMA = SchemaVersion.V1_7
+_LATEST_SCHEMA = SchemaVersion.V1_8
 
 
 @ddt

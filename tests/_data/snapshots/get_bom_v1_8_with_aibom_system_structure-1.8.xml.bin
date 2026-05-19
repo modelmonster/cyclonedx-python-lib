@@ -1,0 +1,93 @@
+<?xml version="1.0" ?>
+<bom xmlns="http://cyclonedx.org/schema/bom/1.8" serialNumber="urn:uuid:1441d33a-e0fc-45b5-af3b-61ee52a88bac" version="1">
+  <metadata>
+    <timestamp>2023-01-07T13:44:32.312678+00:00</timestamp>
+  </metadata>
+  <components>
+    <component type="application" bom-ref="input-filter">
+      <name>Input Safety Filter</name>
+      <trustZone>internal-vpc</trustZone>
+    </component>
+    <component type="machine-learning-model" bom-ref="claude-sonnet">
+      <name>Claude Sonnet</name>
+      <trustZone>public-internet</trustZone>
+    </component>
+  </components>
+  <services>
+    <service bom-ref="knowledge-base">
+      <name>knowledge-base</name>
+      <endpoints>
+        <endpoint>https://kb.internal:6333</endpoint>
+      </endpoints>
+      <trustZone>internal-vpc</trustZone>
+      <data>
+        <classification flow="outbound" bom-ref="data-kb-pifi">PIFI</classification>
+      </data>
+    </service>
+    <service bom-ref="user-input">
+      <name>user-input</name>
+      <endpoints>
+        <endpoint>https://support.example.com/chat</endpoint>
+      </endpoints>
+      <x-trust-boundary>true</x-trust-boundary>
+      <trustZone>public-internet</trustZone>
+      <data>
+        <classification flow="outbound" bom-ref="data-user-pii">PII</classification>
+      </data>
+    </service>
+  </services>
+  <trustZones>
+    <trustZone default="true">
+      <name>internal-vpc</name>
+      <description>Private cloud network</description>
+    </trustZone>
+    <trustZone>
+      <name>public-internet</name>
+      <description>Untrusted external network</description>
+    </trustZone>
+  </trustZones>
+  <dataFlows>
+    <dataFlow bom-ref="df-filter-to-llm">
+      <source>input-filter</source>
+      <target>claude-sonnet</target>
+      <name>Filtered input to LLM</name>
+    </dataFlow>
+    <dataFlow bom-ref="df-kb-to-llm">
+      <source>knowledge-base</source>
+      <target>claude-sonnet</target>
+      <operations>
+        <operation>read</operation>
+      </operations>
+      <dataRef>data-kb-pifi</dataRef>
+      <name>Knowledge base results</name>
+    </dataFlow>
+    <dataFlow bom-ref="df-llm-to-kb">
+      <source>claude-sonnet</source>
+      <target>knowledge-base</target>
+      <operations>
+        <operation>execute</operation>
+        <operation>write</operation>
+      </operations>
+      <name>Retrieval request</name>
+    </dataFlow>
+    <dataFlow bom-ref="df-user-to-filter">
+      <source>user-input</source>
+      <target>input-filter</target>
+      <operations>
+        <operation>read</operation>
+      </operations>
+      <dataRef>data-user-pii</dataRef>
+      <name>User message to input filter</name>
+    </dataFlow>
+  </dataFlows>
+  <dependencies>
+    <dependency ref="claude-sonnet"/>
+    <dependency ref="input-filter"/>
+    <dependency ref="knowledge-base"/>
+    <dependency ref="user-input"/>
+  </dependencies>
+  <properties>
+    <property name="key1">val1</property>
+    <property name="key2">val2</property>
+  </properties>
+</bom>

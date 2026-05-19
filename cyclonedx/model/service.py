@@ -38,6 +38,7 @@ from ..schema.schema import (
     SchemaVersion1Dot5,
     SchemaVersion1Dot6,
     SchemaVersion1Dot7,
+    SchemaVersion1Dot8,
 )
 from . import DataClassification, ExternalReference, Property, XsUri
 from .bom_ref import BomRef
@@ -245,6 +246,7 @@ class Service(Dependable):
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_sequence(9)
     @serializable.xml_string(serializable.XmlStringSerializationType.NORMALIZED_STRING)
     def trust_zone(self) -> Optional[str]:
@@ -318,6 +320,7 @@ class Service(Dependable):
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_array(serializable.XmlArraySerializationType.NESTED, 'property')
     @serializable.xml_sequence(13)
     def properties(self) -> 'SortedSet[Property]':
@@ -359,6 +362,7 @@ class Service(Dependable):
     @serializable.view(SchemaVersion1Dot5)
     @serializable.view(SchemaVersion1Dot6)
     @serializable.view(SchemaVersion1Dot7)
+    @serializable.view(SchemaVersion1Dot8)
     @serializable.xml_sequence(15)
     def release_notes(self) -> Optional[ReleaseNotes]:
         """

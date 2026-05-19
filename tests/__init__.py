@@ -161,7 +161,7 @@ _SNAME_EXT = {
     OutputFormat.XML: 'xml',
 }
 
-_LIMIT_GET_BOM_BY_VERSION_REGEX = re.compile(r'^get_bom_(?P<sv>v(?P<major_version>1)_(?P<minor_version>[0-6]))?(.*)$')
+_LIMIT_GET_BOM_BY_VERSION_REGEX = re.compile(r'^get_bom_(?P<sv>v(?P<major_version>1)_(?P<minor_version>[0-8]))?(.*)$')
 
 
 def _get_purpose_as_str(purpose: Union[Any]) -> str:
