@@ -88,6 +88,10 @@ class TestDataFlowEdge(TestCase):
         with self.assertRaises(ValueError):
             DataFlowEdge(bom_ref=BomRef(), source='a', target='b')
 
+    def test_required_refs_reject_non_string_values(self) -> None:
+        with self.assertRaises(ValueError):
+            DataFlowEdge(bom_ref=123, source='a', target='b')  # type: ignore[arg-type]
+
     def test_optional_data_ref_stays_none(self) -> None:
         e = DataFlowEdge(bom_ref='df-1', source='a', target='b')
         self.assertIsNone(e.data_ref)

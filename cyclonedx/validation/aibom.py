@@ -29,10 +29,10 @@ from enum import Enum
 from typing import Optional
 
 from ..model import DataFlow as ServiceDataFlow
+from ..model.aibom import AIBOM_PROPERTY_PREFIX, AibomProfile, DataFlowEdge, DataFlowOperation
 from ..model.bom import Bom
 from ..model.component import Component
 from ..model.service import Service
-from ..output.aibom import AIBOM_PROPERTY_PREFIX, AibomProfile
 
 
 class AibomSeverity(str, Enum):
@@ -61,21 +61,24 @@ class AibomSemanticValidator:
     """
 
     @classmethod
-    def validate_bom(cls, bom: Bom) -> list[AibomFinding]:
-        node_refs, node_refs_with_owners = cls._collect_node_refs(bom)
+    def validate_bom(cls, bom: Bom, *, check_discovery_properties: bool = True) -> list[AibomFinding]:
+        referenced_node_refs = cls._referenced_node_refs(bom)
+        node_refs, node_refs_with_owners = cls._collect_node_refs(bom, referenced_node_refs)
         edge_refs = [e.bom_ref.value for e in bom.data_flows if e.bom_ref.value is not None]
         data_descriptor_refs, descriptor_owners = cls._collect_service_data_refs(bom)
         node_ref_set = set(node_refs)
         descriptor_ref_set = set(data_descriptor_refs)
+        component_ref_set = cls._collect_component_refs(bom)
 
         findings: list[AibomFinding] = []
         findings.extend(cls._check_duplicate_refs(node_refs, edge_refs, data_descriptor_refs))
         findings.extend(cls._check_edge_resolution(
-            bom, node_ref_set, descriptor_ref_set, descriptor_owners, node_refs_with_owners,
+            bom, node_ref_set, descriptor_ref_set, component_ref_set, descriptor_owners,
         ))
         findings.extend(cls._check_trust_zones(bom, node_refs_with_owners))
         findings.extend(cls._check_profile(bom))
-        findings.extend(cls._check_discovery_properties(bom))
+        if check_discovery_properties:
+            findings.extend(cls._check_discovery_properties(bom))
         return findings
 
     @classmethod
@@ -105,13 +108,14 @@ class AibomSemanticValidator:
         bom: Bom,
         node_ref_set: set[str],
         descriptor_ref_set: set[str],
+        component_ref_set: set[str],
         descriptor_owners: dict[str, Service],
-        node_refs_with_owners: dict[str, object],
     ) -> list[AibomFinding]:
         findings: list[AibomFinding] = []
         for edge in bom.data_flows:
             edge_ref = edge.bom_ref.value
             assert edge_ref is not None
+            findings.extend(cls._check_edge_operations(edge_ref, edge))
             if edge.source.value not in node_ref_set:
                 findings.append(AibomFinding(
                     severity=AibomSeverity.ERROR,
@@ -133,8 +137,8 @@ class AibomSemanticValidator:
             if edge.data_ref is not None:
                 ref = edge.data_ref.value
                 assert ref is not None
-                if ref in node_ref_set and ref not in descriptor_ref_set:
-                    findings.append(cls._data_ref_to_node_finding(edge_ref, ref))
+                if ref not in descriptor_ref_set and ref in node_ref_set.union(component_ref_set):
+                    findings.append(cls._data_ref_to_component_finding(edge_ref, ref))
                 elif ref not in descriptor_ref_set:
                     findings.append(AibomFinding(
                         severity=AibomSeverity.ERROR,
@@ -145,15 +149,30 @@ class AibomSemanticValidator:
                         subject=edge_ref,
                     ))
                 else:
-                    findings.extend(cls._check_flow_consistency(edge, descriptor_owners, node_refs_with_owners))
+                    findings.extend(cls._check_flow_consistency(edge, descriptor_owners))
         return findings
 
     @staticmethod
-    def _data_ref_to_node_finding(edge_ref: str, data_ref: str) -> AibomFinding:
+    def _check_edge_operations(edge_ref: str, edge: DataFlowEdge) -> list[AibomFinding]:
+        findings: list[AibomFinding] = []
+        # Runtime guard for callers that mutate DataFlowEdge._operations or pass
+        # invalid values through Python despite the typed public setter.
+        operations: tuple[object, ...] = tuple(edge.operations)
+        for operation in operations:
+            if not isinstance(operation, DataFlowOperation):
+                findings.append(AibomFinding(
+                    severity=AibomSeverity.ERROR,
+                    message=f'dataflow {edge_ref!r} operation is not a valid AIBOM operation: {operation!r}',
+                    subject=edge_ref,
+                ))
+        return findings
+
+    @staticmethod
+    def _data_ref_to_component_finding(edge_ref: str, data_ref: str) -> AibomFinding:
         return AibomFinding(
             severity=AibomSeverity.ERROR,
             message=(
-                f'dataflow {edge_ref!r} dataRef resolves to a graph node bom-ref ({data_ref!r}). '
+                f'dataflow {edge_ref!r} dataRef resolves to a component bom-ref ({data_ref!r}). '
                 'Component data descriptors are out of scope in this implementation; use the '
                 'component as `source` or `target` instead, or reference a `serviceData.bom-ref`.'
             ),
@@ -195,8 +214,10 @@ class AibomSemanticValidator:
             )]
         return []
 
-    @staticmethod
-    def _check_discovery_properties(bom: Bom) -> list[AibomFinding]:
+    @classmethod
+    def _check_discovery_properties(cls, bom: Bom) -> list[AibomFinding]:
+        if not cls._has_aibom_content(bom):
+            return []
         findings: list[AibomFinding] = []
         prop_names = {p.name for p in bom.properties}
         if f'{AIBOM_PROPERTY_PREFIX}specVersion' not in prop_names:
@@ -211,18 +232,45 @@ class AibomSemanticValidator:
             ))
         return findings
 
+    @classmethod
+    def _has_aibom_content(cls, bom: Bom) -> bool:
+        if bom.data_flows or bom.trust_zones:
+            return True
+        if any(p.name.startswith(AIBOM_PROPERTY_PREFIX) for p in bom.properties):
+            return True
+        _, graph_node_owners = cls._collect_node_refs(bom, cls._referenced_node_refs(bom))
+        if any(getattr(node, 'trust_zone', None) for node in graph_node_owners.values()):
+            return True
+        data_descriptor_refs, _ = cls._collect_service_data_refs(bom)
+        return bool(data_descriptor_refs)
+
     @staticmethod
-    def _collect_node_refs(bom: Bom) -> tuple[list[str], dict[str, object]]:
+    def _referenced_node_refs(bom: Bom) -> set[str]:
+        refs: set[str] = set()
+        for edge in bom.data_flows:
+            if edge.source.value is not None:
+                refs.add(edge.source.value)
+            if edge.target.value is not None:
+                refs.add(edge.target.value)
+        return refs
+
+    @staticmethod
+    def _collect_node_refs(
+        bom: Bom,
+        referenced_node_refs: set[str],
+    ) -> tuple[list[str], dict[str, object]]:
         refs: list[str] = []
         owners: dict[str, object] = {}
 
-        def _walk_component(c: Component) -> None:
+        def _walk_component(c: Component, include_all: bool) -> None:
             ref = c.bom_ref.value
-            if ref is not None:
+            # metadata.component is only a graph node when an edge references it;
+            # root components are always graph-node candidates.
+            if ref is not None and (include_all or ref in referenced_node_refs):
                 refs.append(ref)
                 owners[ref] = c
             for child in c.components:
-                _walk_component(child)
+                _walk_component(child, include_all)
 
         def _walk_service(s: Service) -> None:
             ref = s.bom_ref.value
@@ -233,12 +281,28 @@ class AibomSemanticValidator:
                 _walk_service(child)
 
         for c in bom.components:
-            _walk_component(c)
+            _walk_component(c, True)
         if bom.metadata.component is not None:
-            _walk_component(bom.metadata.component)
+            _walk_component(bom.metadata.component, False)
         for s in bom.services:
             _walk_service(s)
         return refs, owners
+
+    @staticmethod
+    def _collect_component_refs(bom: Bom) -> set[str]:
+        refs: set[str] = set()
+
+        def _walk(c: Component) -> None:
+            if c.bom_ref.value is not None:
+                refs.add(c.bom_ref.value)
+            for child in c.components:
+                _walk(child)
+
+        for c in bom.components:
+            _walk(c)
+        if bom.metadata.component is not None:
+            _walk(bom.metadata.component)
+        return refs
 
     @staticmethod
     def _collect_service_data_refs(bom: Bom) -> tuple[list[str], dict[str, Service]]:
@@ -257,21 +321,19 @@ class AibomSemanticValidator:
             _walk(s)
         return refs, owners
 
-    @classmethod
+    @staticmethod
     def _check_flow_consistency(
-        cls,
-        edge: object,
+        edge: DataFlowEdge,
         descriptor_owners: dict[str, Service],
-        node_owners: dict[str, object],
     ) -> list[AibomFinding]:
         findings: list[AibomFinding] = []
-        ref = edge.data_ref.value  # type: ignore[attr-defined]
-        owner_service = descriptor_owners.get(ref)
-        if owner_service is None:
-            return findings
+        assert edge.data_ref is not None
+        ref = edge.data_ref.value
+        assert ref is not None
+        owner_service = descriptor_owners[ref]
         owner_ref = owner_service.bom_ref.value
-        source_ref = edge.source.value  # type: ignore[attr-defined]
-        target_ref = edge.target.value  # type: ignore[attr-defined]
+        source_ref = edge.source.value
+        target_ref = edge.target.value
         descriptor = next(
             (d for d in owner_service.data if d.bom_ref is not None and d.bom_ref.value == ref),
             None,
@@ -279,7 +341,10 @@ class AibomSemanticValidator:
         if descriptor is None or descriptor.flow is None:
             return findings
         flow = descriptor.flow
-        edge_ref = edge.bom_ref.value  # type: ignore[attr-defined]
+        edge_ref = edge.bom_ref.value
+        assert edge_ref is not None
+        if owner_ref == source_ref and owner_ref == target_ref:
+            return findings
         if owner_ref == source_ref:
             if flow not in (ServiceDataFlow.OUTBOUND, ServiceDataFlow.BI_DIRECTIONAL, ServiceDataFlow.UNKNOWN):
                 findings.append(AibomFinding(

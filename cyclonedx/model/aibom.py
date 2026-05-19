@@ -26,7 +26,7 @@ gated to ``SchemaVersion.V1_8`` only.
 
 from collections.abc import Iterable
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import Any, Optional, Union
 
 import py_serializable as serializable
 from sortedcontainers import SortedSet
@@ -36,8 +36,22 @@ from .._internal.compare import ComparableTuple as _ComparableTuple
 from . import Property
 from .bom_ref import BomRef
 
-if TYPE_CHECKING:  # pragma: no cover
-    pass
+AIBOM_SPEC_VERSION_DEFAULT = '0.1-draft'
+AIBOM_PROPERTY_PREFIX = 'aibom:'
+
+
+class AibomEncoding(str, Enum):
+    """Output encoding mode for AIBOM payloads."""
+    NATIVE = 'native'
+    PROPERTIES = 'properties'
+
+
+class AibomProfile(str, Enum):
+    """AIBOM conformance profile, per AIBOM System Structure specification, section 3.2."""
+    CORE = 'core'
+    CLASSIFIED = 'classified'
+    ZONED = 'zoned'
+    FULL = 'full'
 
 
 class _XsdBoolean(serializable.helpers.BaseHelper):
@@ -233,9 +247,12 @@ class DataFlowEdge:
             if not value.value:
                 raise ValueError(f'DataFlowEdge.{field} must be a non-empty BomRef')
             return value
-        if not value:
+        if isinstance(value, str):
+            if not value:
+                raise ValueError(f'DataFlowEdge.{field} must be a non-empty string or BomRef')
+            return BomRef(value=value)
+        else:
             raise ValueError(f'DataFlowEdge.{field} must be a non-empty string or BomRef')
-        return BomRef(value=str(value))
 
     @property
     @serializable.json_name('bom-ref')

@@ -22,9 +22,12 @@ from unittest import TestCase
 from cyclonedx.exception import MissingOptionalDependencyException
 from cyclonedx.model import DataClassification, DataFlow as ServiceDataFlow, Property
 from cyclonedx.model.aibom import DataFlowEdge, DataFlowOperation, TrustZone
-from cyclonedx.model.bom import Bom
+from cyclonedx.model.bom import Bom, BomMetaData
+from cyclonedx.model.bom_ref import BomRef
 from cyclonedx.model.component import Component
+from cyclonedx.model.dependency import Dependency
 from cyclonedx.model.service import Service
+from cyclonedx.output import make_outputter
 from cyclonedx.output.aibom import (
     AibomEncoding,
     AibomProfile,
@@ -151,6 +154,59 @@ class TestPropertiesEncoding(TestCase):
         prop_values = {p.name: p.value for p in compat.properties}
         self.assertEqual('internal-vpc', prop_values.get('aibom:node:comp1:trustZone'))
 
+    def test_unreferenced_metadata_component_trust_zone_is_not_encoded_as_node(self) -> None:
+        bom = Bom(
+            metadata=BomMetaData(component=Component(name='system', bom_ref='system', trust_zone='internal-vpc')),
+            components=[Component(name='comp1', bom_ref='comp1')],
+            services=[Service(name='svc1', bom_ref='svc1')],
+            data_flows=[DataFlowEdge(bom_ref='df-1', source='comp1', target='svc1')],
+        )
+        compat = make_aibom_properties_bom(bom)
+        prop_names = {p.name for p in compat.properties}
+        self.assertNotIn('aibom:node:system:trustZone', prop_names)
+
+    def test_warns_when_compat_mode_drops_edge_properties(self) -> None:
+        bom = Bom(
+            components=[Component(name='comp1', bom_ref='comp1')],
+            services=[Service(name='svc1', bom_ref='svc1')],
+            data_flows=[
+                DataFlowEdge(
+                    bom_ref='df-1', source='comp1', target='svc1',
+                    properties=[Property(name='reviewed-by', value='security')],
+                ),
+            ],
+        )
+        with self.assertWarnsRegex(UserWarning, 'DataFlowEdge.properties'):
+            make_aibom_properties_bom(bom)
+
+    def test_preserves_component_dependency_bom_ref_alias(self) -> None:
+        shared_ref = BomRef(value='comp1')
+        component = Component(name='comp1', bom_ref=shared_ref)
+        bom = Bom(
+            components=[component],
+            services=[Service(name='svc1', bom_ref='svc1')],
+            dependencies=[Dependency(ref=shared_ref)],
+            data_flows=[DataFlowEdge(bom_ref='df-1', source='comp1', target='svc1')],
+        )
+        compat = make_aibom_properties_bom(bom)
+        compat_component = next(iter(compat.components))
+        compat_dependency = next(iter(compat.dependencies))
+        self.assertIs(compat_component.bom_ref, compat_dependency.ref)
+
+    def test_shallow_copy_preserves_post_construction_state(self) -> None:
+        bom = _full_aibom()
+        marker = object()
+        bom._future_bom_field = marker
+        compat = make_aibom_properties_bom(bom)
+        self.assertIs(marker, compat._future_bom_field)
+
+    def test_shallow_copy_rebuilds_top_level_collections(self) -> None:
+        bom = _full_aibom()
+        compat = make_aibom_properties_bom(bom)
+        self.assertIsNot(bom.components, compat.components)
+        compat.components.add(Component(name='new-comp', bom_ref='new-comp'))
+        self.assertEqual({'comp1'}, {c.bom_ref.value for c in bom.components})
+
 
 class TestNativeEncoding(TestCase):
 
@@ -167,6 +223,20 @@ class TestNativeEncoding(TestCase):
         self.assertIn('aibom:profile', names)
         prop_values = {p.name: p.value for p in out.properties}
         self.assertEqual('native', prop_values['aibom:encoding'])
+
+    def test_native_copy_preserves_post_construction_state(self) -> None:
+        bom = _full_aibom()
+        marker = object()
+        bom._future_bom_field = marker
+        native = make_aibom_native_bom(bom)
+        self.assertIs(marker, native._future_bom_field)
+
+    def test_native_copy_rebuilds_top_level_collections(self) -> None:
+        bom = _full_aibom()
+        native = make_aibom_native_bom(bom)
+        self.assertIsNot(bom.data_flows, native.data_flows)
+        native.data_flows.add(DataFlowEdge(bom_ref='df-new', source='comp1', target='svc1'))
+        self.assertEqual({'df-1', 'df-2'}, {e.bom_ref.value for e in bom.data_flows})
 
 
 class TestMakeAibomOutputter(TestCase):
@@ -213,6 +283,9 @@ class TestMakeAibomOutputter(TestCase):
         self.assertNotIn('dataFlows', parsed)
         self.assertNotIn('trustZones', parsed)
         self.assertEqual('1.7', parsed['specVersion'])
+        prop_names = {p['name'] for p in parsed['properties']}
+        self.assertIn('aibom:dataFlow:df-1:source', prop_names)
+        self.assertEqual('public-internet', parsed['services'][0]['trustZone'])
         self._validate_json(SchemaVersion.V1_7, out)
 
     def test_properties_v17_xml_valid(self) -> None:
@@ -238,6 +311,69 @@ class TestMakeAibomOutputter(TestCase):
                 schema_version=SchemaVersion.V1_8, encoding=AibomEncoding.PROPERTIES,
             )
 
+    def test_aibom_helper_rejects_trust_zones_without_data_flows(self) -> None:
+        bom = Bom(
+            components=[Component(name='comp1', bom_ref='comp1', trust_zone='internal-vpc')],
+            trust_zones=[TrustZone(name='internal-vpc')],
+        )
+        with self.assertRaisesRegex(ValueError, 'AIBOM output requires at least one data flow'):
+            make_aibom_outputter(
+                bom, OutputFormat.JSON,
+                schema_version=SchemaVersion.V1_8, encoding=AibomEncoding.NATIVE,
+            )
+
+    def test_generic_v18_output_does_not_add_discovery_properties(self) -> None:
+        bom = _full_aibom()
+        generic_out = make_outputter(bom, OutputFormat.JSON, SchemaVersion.V1_8).output_as_string()
+        helper_out = make_aibom_outputter(
+            bom, OutputFormat.JSON,
+            schema_version=SchemaVersion.V1_8, encoding=AibomEncoding.NATIVE,
+        ).output_as_string()
+        generic_props = json_loads(generic_out).get('properties', [])
+        helper_props = json_loads(helper_out)['properties']
+        self.assertEqual([], [p for p in generic_props if p['name'].startswith('aibom:')])
+        self.assertIn('aibom:specVersion', {p['name'] for p in helper_props})
+        self.assertEqual(0, len(bom.properties))
+
+    def test_semantic_errors_block_output_by_default(self) -> None:
+        bom = Bom(
+            services=[Service(name='svc1', bom_ref='svc1')],
+            data_flows=[DataFlowEdge(bom_ref='df-1', source='ghost', target='svc1')],
+        )
+        with self.assertRaisesRegex(ValueError, 'AIBOM semantic validation failed: .*ghost'):
+            make_aibom_outputter(
+                bom, OutputFormat.JSON,
+                schema_version=SchemaVersion.V1_8, encoding=AibomEncoding.NATIVE,
+            )
+
+    def test_semantic_validation_can_be_disabled(self) -> None:
+        bom = Bom(
+            services=[Service(name='svc1', bom_ref='svc1')],
+            data_flows=[DataFlowEdge(bom_ref='df-1', source='ghost', target='svc1')],
+        )
+        out = make_aibom_outputter(
+            bom, OutputFormat.JSON,
+            schema_version=SchemaVersion.V1_8, encoding=AibomEncoding.NATIVE,
+            validate_semantics=False,
+        ).output_as_string()
+        self.assertIn('ghost', out)
+
+    def test_warning_only_semantic_findings_do_not_block_output(self) -> None:
+        svc = Service(
+            name='svc1', bom_ref='svc1',
+            data=[DataClassification(flow=ServiceDataFlow.INBOUND, classification='PII', bom_ref='data-pii')],
+        )
+        bom = Bom(
+            components=[Component(name='comp1', bom_ref='comp1')],
+            services=[svc],
+            data_flows=[DataFlowEdge(bom_ref='df-1', source='svc1', target='comp1', data_ref='data-pii')],
+        )
+        out = make_aibom_outputter(
+            bom, OutputFormat.JSON,
+            schema_version=SchemaVersion.V1_8, encoding=AibomEncoding.NATIVE,
+        ).output_as_string()
+        self.assertIn('df-1', out)
+
 
 class TestRoundtrip(TestCase):
 
@@ -256,3 +392,18 @@ class TestRoundtrip(TestCase):
         from_xml = Bom.from_xml(StringIO(xml_out))
         self.assertEqual(2, len(from_xml.data_flows))
         self.assertEqual(2, len(from_xml.trust_zones))
+
+    def test_native_v18_xml_to_json_roundtrip(self) -> None:
+        bom = _full_aibom()
+        xml_out = make_aibom_outputter(
+            bom, OutputFormat.XML,
+            schema_version=SchemaVersion.V1_8, encoding=AibomEncoding.NATIVE,
+        ).output_as_string()
+        from_xml = Bom.from_xml(StringIO(xml_out))
+        json_out = make_aibom_outputter(
+            from_xml, OutputFormat.JSON,
+            schema_version=SchemaVersion.V1_8, encoding=AibomEncoding.NATIVE,
+        ).output_as_string()
+        from_json = Bom.from_json(json_loads(json_out))
+        self.assertEqual(2, len(from_json.data_flows))
+        self.assertEqual(2, len(from_json.trust_zones))

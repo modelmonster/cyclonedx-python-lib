@@ -31,44 +31,38 @@ Provides two output modes over one internal :class:`cyclonedx.model.bom.Bom`:
 The helpers never mutate the caller's :class:`Bom`.
 """
 
-from enum import Enum
+from collections.abc import Iterable
+from copy import copy
 from typing import Optional
+from warnings import warn
 
 from ..model import Property
-from ..model.aibom import DataFlowEdge, TrustZone
+from ..model.aibom import (
+    AIBOM_PROPERTY_PREFIX,
+    AIBOM_SPEC_VERSION_DEFAULT,
+    AibomEncoding,
+    AibomProfile,
+    DataFlowEdge,
+    TrustZone,
+)
 from ..model.bom import Bom
 from ..model.component import Component
 from ..model.service import Service
 from ..schema import OutputFormat, SchemaVersion
+from ..validation.aibom import AibomSemanticValidator, AibomSeverity
 from . import BaseOutput
 from .json import BY_SCHEMA_VERSION as _JSON_BY_SCHEMA_VERSION
 from .xml import BY_SCHEMA_VERSION as _XML_BY_SCHEMA_VERSION
-
-AIBOM_SPEC_VERSION_DEFAULT = '0.1-draft'
-AIBOM_PROPERTY_PREFIX = 'aibom:'
-
-
-class AibomEncoding(str, Enum):
-    """Output encoding mode for AIBOM payloads."""
-    NATIVE = 'native'
-    PROPERTIES = 'properties'
-
-
-class AibomProfile(str, Enum):
-    """AIBOM conformance profile, per AIBOM System Structure specification, section 3.2."""
-    CORE = 'core'
-    CLASSIFIED = 'classified'
-    ZONED = 'zoned'
-    FULL = 'full'
 
 
 def _has_zoned_fields(bom: Bom) -> bool:
     if any(True for _ in bom.trust_zones):
         return True
-    for c in bom.components:
+    referenced_node_refs = _referenced_node_refs(bom)
+    for c in _walk_components(bom, referenced_node_refs):
         if getattr(c, 'trust_zone', None):
             return True
-    for s in bom.services:
+    for s in _walk_services(bom):
         if getattr(s, 'trust_zone', None):
             return True
     return False
@@ -98,12 +92,49 @@ def infer_profile(bom: Bom) -> Optional[AibomProfile]:
     return AibomProfile.CORE
 
 
+def _resolve_profile(bom: Bom, profile: Optional[AibomProfile]) -> AibomProfile:
+    inferred_profile = infer_profile(bom)
+    if inferred_profile is None:
+        raise ValueError('AIBOM output requires at least one data flow')
+    return profile or inferred_profile
+
+
+def _raise_on_semantic_errors(bom: Bom) -> None:
+    errors = [
+        finding for finding in AibomSemanticValidator.validate_bom(bom, check_discovery_properties=False)
+        if finding.severity == AibomSeverity.ERROR
+    ]
+    if errors:
+        messages = '; '.join(finding.message for finding in errors)
+        raise ValueError(f'AIBOM semantic validation failed: {messages}')
+
+
 def _strip_aibom_properties(props: list[Property]) -> list[Property]:
     return [p for p in props if not p.name.startswith(AIBOM_PROPERTY_PREFIX)]
 
 
+def _copy_bom_with_properties(bom: Bom, properties: list[Property]) -> Bom:
+    copied = copy(bom)
+    copied.components = list(bom.components)
+    copied.services = list(bom.services)
+    copied.external_references = list(bom.external_references)
+    copied.vulnerabilities = list(bom.vulnerabilities)
+    copied.dependencies = list(bom.dependencies)
+    copied.trust_zones = list(bom.trust_zones)
+    copied.data_flows = list(bom.data_flows)
+    copied.properties = properties
+    return copied
+
+
 def _edge_properties(edge: DataFlowEdge) -> list[Property]:
     prefix = f'{AIBOM_PROPERTY_PREFIX}dataFlow:{edge.bom_ref.value}'
+    if edge.properties:
+        warn(
+            'DataFlowEdge.properties cannot be represented in AIBOM properties compatibility mode; '
+            f'dropping properties on dataflow {edge.bom_ref.value!r}.',
+            category=UserWarning,
+            stacklevel=2,
+        )
     out: list[Property] = [
         Property(name=f'{prefix}:source', value=edge.source.value),
         Property(name=f'{prefix}:target', value=edge.target.value),
@@ -131,7 +162,7 @@ def _trust_zone_properties(tz: TrustZone) -> list[Property]:
 
 def _component_trust_zone_properties(bom: Bom) -> list[Property]:
     out: list[Property] = []
-    for c in _walk_components(bom):
+    for c in _walk_components(bom, _referenced_node_refs(bom)):
         tz = getattr(c, 'trust_zone', None)
         if tz:
             out.append(Property(
@@ -172,26 +203,36 @@ def _service_data_descriptor_properties(bom: Bom) -> list[Property]:
     return out
 
 
-def _walk_components(bom: Bom) -> list[Component]:
+def _referenced_node_refs(bom: Bom) -> set[str]:
+    refs: set[str] = set()
+    for edge in bom.data_flows:
+        if edge.source.value is not None:
+            refs.add(edge.source.value)
+        if edge.target.value is not None:
+            refs.add(edge.target.value)
+    return refs
+
+
+def _walk_components(bom: Bom, referenced_node_refs: set[str]) -> list[Component]:
     out: list[Component] = []
 
-    def _recurse(comps: object) -> None:
-        for c in comps:  # type: ignore[attr-defined]
-            out.append(c)
-            _recurse(c.components)
+    def _recurse(comps: Iterable[Component], include_all: bool) -> None:
+        for c in comps:
+            if include_all or c.bom_ref.value in referenced_node_refs:
+                out.append(c)
+            _recurse(c.components, include_all)
 
-    _recurse(bom.components)
+    _recurse(bom.components, True)
     if bom.metadata.component is not None:
-        out.append(bom.metadata.component)
-        _recurse(bom.metadata.component.components)
+        _recurse((bom.metadata.component,), False)
     return out
 
 
 def _walk_services(bom: Bom) -> list[Service]:
     out: list[Service] = []
 
-    def _recurse(svcs: object) -> None:
-        for s in svcs:  # type: ignore[attr-defined]
+    def _recurse(svcs: Iterable[Service]) -> None:
+        for s in svcs:
             out.append(s)
             _recurse(s.services)
 
@@ -204,6 +245,7 @@ def make_aibom_properties_bom(
     *,
     profile: Optional[AibomProfile] = None,
     spec_version: str = AIBOM_SPEC_VERSION_DEFAULT,
+    validate_semantics: bool = True,
 ) -> Bom:
     """
     Return a new :class:`Bom` carrying the same component, service, dependency,
@@ -213,8 +255,19 @@ def make_aibom_properties_bom(
     The original ``bom`` is not mutated. AIBOM native fields (``dataFlows[]``,
     ``trustZones[]``) are dropped from the returned BOM because CycloneDX 1.7
     has no schema slot for them.
+
+    The returned BOM is a shallow structural copy. It gets its own top-level
+    property, trust-zone, and data-flow collections, but it shares contained
+    component, service, dependency, vulnerability, metadata, and definition
+    objects with ``bom``.
+
+    Raises:
+        ValueError: when ``bom`` has no ``dataFlows[]`` or semantic validation
+            reports errors.
     """
-    resolved_profile = profile or infer_profile(bom) or AibomProfile.CORE
+    resolved_profile = _resolve_profile(bom, profile)
+    if validate_semantics:
+        _raise_on_semantic_errors(bom)
     new_properties: list[Property] = _strip_aibom_properties(list(bom.properties))
     new_properties.append(Property(name=f'{AIBOM_PROPERTY_PREFIX}specVersion', value=spec_version))
     new_properties.append(Property(name=f'{AIBOM_PROPERTY_PREFIX}encoding', value=AibomEncoding.PROPERTIES.value))
@@ -225,18 +278,10 @@ def make_aibom_properties_bom(
     for tz in bom.trust_zones:
         new_properties.extend(_trust_zone_properties(tz))
     new_properties.extend(_component_trust_zone_properties(bom))
-    return Bom(
-        components=list(bom.components),
-        services=list(bom.services),
-        external_references=list(bom.external_references),
-        serial_number=bom.serial_number,
-        version=bom.version,
-        metadata=bom.metadata,
-        dependencies=list(bom.dependencies),
-        vulnerabilities=list(bom.vulnerabilities),
-        properties=new_properties,
-        definitions=bom.definitions,
-    )
+    copied = _copy_bom_with_properties(bom, new_properties)
+    copied.trust_zones = []
+    copied.data_flows = []
+    return copied
 
 
 def make_aibom_native_bom(
@@ -244,6 +289,7 @@ def make_aibom_native_bom(
     *,
     profile: Optional[AibomProfile] = None,
     spec_version: str = AIBOM_SPEC_VERSION_DEFAULT,
+    validate_semantics: bool = True,
 ) -> Bom:
     """
     Return a copy of ``bom`` with AIBOM discovery properties
@@ -253,26 +299,24 @@ def make_aibom_native_bom(
     Native AIBOM fields (``trust_zones``, ``data_flows``, component
     ``trustZone``, service-data ``bom-ref``) flow through unchanged because the
     CycloneDX 1.8 schema carries them.
+
+    The returned BOM is a shallow structural copy. It gets its own top-level
+    property collection, but it shares contained component, service, dependency,
+    vulnerability, trust-zone, data-flow, metadata, and definition objects with
+    ``bom``.
+
+    Raises:
+        ValueError: when ``bom`` has no ``dataFlows[]`` or semantic validation
+            reports errors.
     """
-    resolved_profile = profile or infer_profile(bom) or AibomProfile.CORE
+    resolved_profile = _resolve_profile(bom, profile)
+    if validate_semantics:
+        _raise_on_semantic_errors(bom)
     new_properties: list[Property] = _strip_aibom_properties(list(bom.properties))
     new_properties.append(Property(name=f'{AIBOM_PROPERTY_PREFIX}specVersion', value=spec_version))
     new_properties.append(Property(name=f'{AIBOM_PROPERTY_PREFIX}encoding', value=AibomEncoding.NATIVE.value))
     new_properties.append(Property(name=f'{AIBOM_PROPERTY_PREFIX}profile', value=resolved_profile.value))
-    return Bom(
-        components=list(bom.components),
-        services=list(bom.services),
-        external_references=list(bom.external_references),
-        serial_number=bom.serial_number,
-        version=bom.version,
-        metadata=bom.metadata,
-        dependencies=list(bom.dependencies),
-        vulnerabilities=list(bom.vulnerabilities),
-        properties=new_properties,
-        definitions=bom.definitions,
-        trust_zones=list(bom.trust_zones),
-        data_flows=list(bom.data_flows),
-    )
+    return _copy_bom_with_properties(bom, new_properties)
 
 
 def make_aibom_outputter(
@@ -283,28 +327,38 @@ def make_aibom_outputter(
     encoding: AibomEncoding = AibomEncoding.NATIVE,
     profile: Optional[AibomProfile] = None,
     spec_version: str = AIBOM_SPEC_VERSION_DEFAULT,
+    validate_semantics: bool = True,
 ) -> BaseOutput:
     """
     Build a CycloneDX outputter for an AIBOM payload, delegating to the
     existing JSON/XML outputter for the requested schema version.
 
+    Generic V1.8 outputters can serialize native AIBOM fields without these
+    discovery properties and without AIBOM semantic validation. Use this helper
+    when the output is intended to claim AIBOM conformance.
+
     :param encoding: ``AibomEncoding.NATIVE`` requires
         ``schema_version is SchemaVersion.V1_8``.
         ``AibomEncoding.PROPERTIES`` requires ``schema_version is SchemaVersion.V1_7``.
-    :raises ValueError: when the ``encoding``/``schema_version`` pair is unsupported.
+    :raises ValueError: when the ``encoding``/``schema_version`` pair is unsupported,
+        the BOM has no dataflows, or semantic validation reports errors.
     """
     if encoding is AibomEncoding.NATIVE:
         if schema_version is not SchemaVersion.V1_8:
             raise ValueError(
                 f'AIBOM native encoding requires SchemaVersion.V1_8, got {schema_version}'
             )
-        prepared = make_aibom_native_bom(bom, profile=profile, spec_version=spec_version)
+        prepared = make_aibom_native_bom(
+            bom, profile=profile, spec_version=spec_version, validate_semantics=validate_semantics,
+        )
     elif encoding is AibomEncoding.PROPERTIES:
         if schema_version is not SchemaVersion.V1_7:
             raise ValueError(
                 f'AIBOM properties encoding requires SchemaVersion.V1_7, got {schema_version}'
             )
-        prepared = make_aibom_properties_bom(bom, profile=profile, spec_version=spec_version)
+        prepared = make_aibom_properties_bom(
+            bom, profile=profile, spec_version=spec_version, validate_semantics=validate_semantics,
+        )
     else:
         raise ValueError(f'Unsupported AIBOM encoding: {encoding!r}')
 
