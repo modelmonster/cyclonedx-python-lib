@@ -66,7 +66,6 @@ class SnapshotMixin:
         if RECREATE_SNAPSHOTS:
             self.writeSnapshot(snapshot_name, actual)
         _omd = self.maxDiff
-        _omd = self.maxDiff
         self.maxDiff = None
         try:
             self.assertEqual(actual, self.readSnapshot(snapshot_name))

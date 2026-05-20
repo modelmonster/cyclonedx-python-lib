@@ -126,6 +126,24 @@ class TestAibomSemanticValidator(TestCase):
         msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'dataRef' in m]
         self.assertTrue(any('component bom-ref' in m for m in msgs), msgs)
 
+    def test_data_ref_owned_by_non_endpoint_service_is_error(self) -> None:
+        unrelated = Service(
+            name='unrelated', bom_ref='unrelated',
+            data=[DataClassification(flow=ServiceDataFlow.OUTBOUND, classification='PII', bom_ref='data-pii')],
+        )
+        bom = Bom(
+            services=[
+                Service(name='left', bom_ref='left'),
+                Service(name='right', bom_ref='right'),
+                unrelated,
+            ],
+            data_flows=[
+                DataFlowEdge(bom_ref='df-1', source='left', target='right', data_ref='data-pii'),
+            ],
+        )
+        msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'dataRef' in m]
+        self.assertTrue(any('source or target service' in m for m in msgs), msgs)
+
     def test_invalid_operation_is_error(self) -> None:
         edge = DataFlowEdge(bom_ref='df-1', source='comp1', target='svc1')
         edge.operations = ['merge']  # type: ignore[list-item]

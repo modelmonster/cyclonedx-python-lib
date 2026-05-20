@@ -149,7 +149,11 @@ class AibomSemanticValidator:
                         subject=edge_ref,
                     ))
                 else:
-                    findings.extend(cls._check_flow_consistency(edge, descriptor_owners))
+                    owner_ref = descriptor_owners[ref].bom_ref.value
+                    if owner_ref not in (edge.source.value, edge.target.value):
+                        findings.append(cls._data_ref_owner_finding(edge_ref, ref, owner_ref))
+                    else:
+                        findings.extend(cls._check_flow_consistency(edge, descriptor_owners))
         return findings
 
     @staticmethod
@@ -175,6 +179,17 @@ class AibomSemanticValidator:
                 f'dataflow {edge_ref!r} dataRef resolves to a component bom-ref ({data_ref!r}). '
                 'Component data descriptors are out of scope in this implementation; use the '
                 'component as `source` or `target` instead, or reference a `serviceData.bom-ref`.'
+            ),
+            subject=edge_ref,
+        )
+
+    @staticmethod
+    def _data_ref_owner_finding(edge_ref: str, data_ref: str, owner_ref: Optional[str]) -> AibomFinding:
+        return AibomFinding(
+            severity=AibomSeverity.ERROR,
+            message=(
+                f'dataflow {edge_ref!r} dataRef {data_ref!r} is owned by service {owner_ref!r}; '
+                'dataRef service-data descriptors must be owned by the source or target service.'
             ),
             subject=edge_ref,
         )
