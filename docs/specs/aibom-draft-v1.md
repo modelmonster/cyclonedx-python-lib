@@ -72,6 +72,10 @@ four axes:
 - `scope`;
 - `completeness`.
 
+The `generationMethod` axis is the AIBOM document-level provenance
+declaration — how the graph was produced. AIBOM defines no separate
+provenance model.
+
 In AIBOM Core, these axes are BOM-level `aibom:` properties. The
 `completeness` axis is carried as `aibom:completeness`, whose values map onto
 CycloneDX `aggregateType` semantics. In AIBOM Enriched, the same completeness
@@ -141,14 +145,19 @@ services, formulation objects, interaction edges, or a separate companion
 profile. The default assumption for v0.1 is that internal processing is node
 behavior, not edge behavior.
 
-### A6. Edge Evidence Is An Attachment Requirement
+### A6. Edges Must Be Referenceable
 
-The requirement is per-edge attestability, not a native `dataFlow.evidence`
-field.
+Every `dataFlow` edge SHALL be a stable, referenceable target: a `bom-ref` in
+the native encoding, and the canonical decoded id defined below in the
+CycloneDX 1.7 property encoding. This is a graph-structure requirement — it
+is what lets AIBOM-aware declarations, requirement mappings, findings,
+suppressions, and compositions attach to a specific edge.
 
-AIBOM Enriched attaches evidence through CycloneDX `declarations` whose
-`targets` reference the edge id. AIBOM Core reserves a canonical decoded edge
-target and MAY point to evidence through `externalReferences`.
+AIBOM defines no evidence or provenance model and requires no evidence on any
+edge. There is no native `dataFlow.evidence` field. Edge-level evidence MAY
+be attached to the edge id through existing CycloneDX constructs —
+`declarations` whose `targets` reference the edge id (AIBOM Enriched), or
+`externalReferences` (AIBOM Core).
 
 For AIBOM Core property encoding, the property group
 `aibom:dataFlow:{compat-id}:*` decodes into one logical edge whose canonical

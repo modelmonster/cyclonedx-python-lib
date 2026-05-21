@@ -411,6 +411,4 @@ mapping work, but those adjacent efforts remain outside this document's scope.
 **Reasoning:** Overclaiming adjacent standards would distract from the narrower
 system-structure delta and create unnecessary review cost.
 
-## Related Plans
 
-- `docs/plans/2026-05-21-aibom-everett-policy-evaluation.md`
