@@ -368,7 +368,22 @@ def get_component_crypto_asset_related_material(
 
 
 def get_bom_v1_8_with_aibom_system_structure() -> Bom:
-    from cyclonedx.model.aibom import DataFlowEdge, DataFlowOperation, TrustZone
+    from cyclonedx.model.aibom import (
+        AIBOM_PROP_COMPLETENESS,
+        AIBOM_PROP_GENERATION_METHOD,
+        AIBOM_PROP_GRAPH_TYPE,
+        AIBOM_PROP_MODEL_REF,
+        AIBOM_PROP_SCOPE,
+        AIBOM_PROP_SERVICE_ROLE,
+        AIBOM_PROP_SYSTEM_RELATIONSHIP,
+        AIBOM_PROP_TRUST_PERSPECTIVE,
+        AIBOM_SERVICE_ROLE_MODEL_SERVING,
+        AibomCompleteness,
+        AibomSystemRelationship,
+        DataFlowEdge,
+        DataFlowOperation,
+        TrustZone,
+    )
     user_input = Service(
         name='user-input',
         bom_ref='user-input',
@@ -396,9 +411,21 @@ def get_bom_v1_8_with_aibom_system_structure() -> Bom:
         bom_ref='claude-sonnet',
         trust_zone='public-internet',
     )
-    return _make_bom(
+    model_endpoint = Service(
+        name='anthropic-claude-api',
+        bom_ref='anthropic-claude-api',
+        endpoints=[XsUri('https://api.anthropic.com/v1/messages')],
+        x_trust_boundary=True,
+        trust_zone='public-internet',
+        properties=[
+            Property(name=AIBOM_PROP_SERVICE_ROLE, value=AIBOM_SERVICE_ROLE_MODEL_SERVING),
+            Property(name=AIBOM_PROP_MODEL_REF, value='claude-sonnet'),
+            Property(name=AIBOM_PROP_SYSTEM_RELATIONSHIP, value=AibomSystemRelationship.EXTERNAL.value),
+        ],
+    )
+    bom = _make_bom(
         components=[input_filter, llm],
-        services=[user_input, knowledge_base],
+        services=[user_input, knowledge_base, model_endpoint],
         trust_zones=[
             TrustZone(name='public-internet', description='Untrusted external network'),
             TrustZone(name='internal-vpc', description='Private cloud network', default=True),
@@ -408,29 +435,42 @@ def get_bom_v1_8_with_aibom_system_structure() -> Bom:
                 bom_ref='df-user-to-filter',
                 source='user-input', target='input-filter',
                 operations=[DataFlowOperation.READ],
-                data_ref='data-user-pii',
+                data_refs=['data-user-pii'],
                 name='User message to input filter',
             ),
             DataFlowEdge(
                 bom_ref='df-filter-to-llm',
-                source='input-filter', target='claude-sonnet',
-                name='Filtered input to LLM',
+                source='input-filter', target='anthropic-claude-api',
+                data=[
+                    DataClassification(flow=DataFlow.UNKNOWN, classification='prompt', bom_ref='data-filtered-prompt'),
+                ],
+                data_refs=['data-filtered-prompt'],
+                name='Filtered input to hosted model endpoint',
             ),
             DataFlowEdge(
                 bom_ref='df-llm-to-kb',
-                source='claude-sonnet', target='knowledge-base',
+                source='anthropic-claude-api', target='knowledge-base',
                 operations=[DataFlowOperation.WRITE, DataFlowOperation.EXECUTE],
                 name='Retrieval request',
             ),
             DataFlowEdge(
                 bom_ref='df-kb-to-llm',
-                source='knowledge-base', target='claude-sonnet',
+                source='knowledge-base', target='anthropic-claude-api',
                 operations=[DataFlowOperation.READ],
-                data_ref='data-kb-pifi',
+                data_refs=['data-kb-pifi'],
                 name='Knowledge base results',
             ),
         ],
     )
+    bom.properties = [
+        *bom.properties,
+        Property(name=AIBOM_PROP_GRAPH_TYPE, value='system-structure'),
+        Property(name=AIBOM_PROP_GENERATION_METHOD, value='declared'),
+        Property(name=AIBOM_PROP_SCOPE, value='ai-system'),
+        Property(name=AIBOM_PROP_COMPLETENESS, value=AibomCompleteness.UNKNOWN.value),
+        Property(name=AIBOM_PROP_TRUST_PERSPECTIVE, value='producer'),
+    ]
+    return bom
 
 
 def get_bom_v1_6_with_crypto_algorithm() -> Bom:

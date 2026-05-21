@@ -18,11 +18,35 @@
 from unittest import TestCase
 
 from cyclonedx.model import DataClassification, DataFlow as ServiceDataFlow, Property
-from cyclonedx.model.aibom import DataFlowEdge, DataFlowOperation, TrustZone
+from cyclonedx.model.aibom import (
+    AIBOM_PROP_COMPLETENESS,
+    AIBOM_PROP_GENERATION_METHOD,
+    AIBOM_PROP_GRAPH_TYPE,
+    AIBOM_PROP_MODEL_REF,
+    AIBOM_PROP_SCOPE,
+    AIBOM_PROP_SERVICE_ROLE,
+    AIBOM_PROP_SYSTEM_RELATIONSHIP,
+    AIBOM_PROP_TRUST_PERSPECTIVE,
+    AIBOM_SERVICE_ROLE_MODEL_SERVING,
+    AibomCompleteness,
+    DataFlowEdge,
+    DataFlowOperation,
+    TrustZone,
+)
 from cyclonedx.model.bom import Bom, BomMetaData
 from cyclonedx.model.component import Component, ComponentType
 from cyclonedx.model.service import Service
 from cyclonedx.validation.aibom import AibomSemanticValidator, AibomSeverity
+
+
+def _graph_props(*extra: Property, scope: str = 'ai-system') -> list[Property]:
+    return [
+        Property(name=AIBOM_PROP_GRAPH_TYPE, value='system-structure'),
+        Property(name=AIBOM_PROP_GENERATION_METHOD, value='declared'),
+        Property(name=AIBOM_PROP_SCOPE, value=scope),
+        Property(name=AIBOM_PROP_COMPLETENESS, value=AibomCompleteness.UNKNOWN.value),
+        *extra,
+    ]
 
 
 def _findings_with(bom: Bom) -> list[tuple[str, str]]:
@@ -43,13 +67,10 @@ class TestAibomSemanticValidator(TestCase):
             data_flows=[
                 DataFlowEdge(
                     bom_ref='df-1', source='svc1', target='comp1',
-                    operations=[DataFlowOperation.READ], data_ref='data-pii',
+                    operations=[DataFlowOperation.READ], data_refs=['data-pii'],
                 ),
             ],
-            properties=[
-                Property(name='aibom:specVersion', value='0.1-draft'),
-                Property(name='aibom:profile', value='full'),
-            ],
+            properties=_graph_props(Property(name=AIBOM_PROP_TRUST_PERSPECTIVE, value='producer')),
         )
         findings = AibomSemanticValidator.validate_bom(bom)
         errors = [f for f in findings if f.severity == AibomSeverity.ERROR]
@@ -60,6 +81,7 @@ class TestAibomSemanticValidator(TestCase):
             components=[Component(name='comp1', bom_ref='same-ref')],
             services=[Service(name='svc1', bom_ref='same-ref')],
             data_flows=[DataFlowEdge(bom_ref='df-1', source='same-ref', target='same-ref')],
+            properties=_graph_props(),
         )
         msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'duplicate bom-ref' in m]
         self.assertTrue(any('same-ref' in m for m in msgs), msgs)
@@ -71,6 +93,7 @@ class TestAibomSemanticValidator(TestCase):
                 DataFlowEdge(bom_ref='df-dup', source='comp1', target='comp2'),
                 DataFlowEdge(bom_ref='df-dup', source='comp2', target='comp1'),
             ],
+            properties=_graph_props(),
         )
         msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'duplicate bom-ref' in m]
         self.assertTrue(any('df-dup' in m for m in msgs), msgs)
@@ -86,7 +109,8 @@ class TestAibomSemanticValidator(TestCase):
         )
         bom = Bom(
             services=[left, right],
-            data_flows=[DataFlowEdge(bom_ref='df-1', source='left', target='right', data_ref='data-dup')],
+            data_flows=[DataFlowEdge(bom_ref='df-1', source='left', target='right', data_refs=['data-dup'])],
+            properties=_graph_props(),
         )
         msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'duplicate bom-ref' in m]
         self.assertTrue(any('data-dup' in m for m in msgs), msgs)
@@ -96,6 +120,7 @@ class TestAibomSemanticValidator(TestCase):
             components=[Component(name='comp1', bom_ref='comp1')],
             services=[Service(name='svc1', bom_ref='svc1')],
             data_flows=[DataFlowEdge(bom_ref='df-1', source='ghost', target='svc1')],
+            properties=_graph_props(),
         )
         msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'source' in m]
         self.assertTrue(any('ghost' in m for m in msgs), msgs)
@@ -104,6 +129,7 @@ class TestAibomSemanticValidator(TestCase):
         bom = Bom(
             components=[Component(name='comp1', bom_ref='comp1')],
             data_flows=[DataFlowEdge(bom_ref='df-1', source='comp1', target='ghost')],
+            properties=_graph_props(),
         )
         msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'target' in m]
         self.assertTrue(any('ghost' in m for m in msgs), msgs)
@@ -112,16 +138,40 @@ class TestAibomSemanticValidator(TestCase):
         bom = Bom(
             components=[Component(name='comp1', bom_ref='comp1')],
             services=[Service(name='svc1', bom_ref='svc1')],
-            data_flows=[DataFlowEdge(bom_ref='df-1', source='comp1', target='svc1', data_ref='unknown-data')],
+            data_flows=[DataFlowEdge(bom_ref='df-1', source='comp1', target='svc1', data_refs=['unknown-data'])],
+            properties=_graph_props(),
         )
         msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'dataRef' in m]
         self.assertTrue(any('unknown-data' in m for m in msgs), msgs)
+
+    def test_inline_data_ref_resolves_on_same_edge(self) -> None:
+        bom = Bom(
+            components=[Component(name='comp1', bom_ref='comp1')],
+            services=[Service(name='svc1', bom_ref='svc1')],
+            data_flows=[
+                DataFlowEdge(
+                    bom_ref='df-1', source='comp1', target='svc1',
+                    data_refs=['edge-data'],
+                    data=[
+                        DataClassification(
+                            flow=ServiceDataFlow.UNKNOWN,
+                            classification='prompt',
+                            bom_ref='edge-data',
+                        ),
+                    ],
+                ),
+            ],
+            properties=_graph_props(),
+        )
+        msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'edge-data' in m]
+        self.assertEqual([], msgs)
 
     def test_data_ref_to_component_bom_ref_is_error(self) -> None:
         bom = Bom(
             components=[Component(name='comp-data', bom_ref='comp-data', type=ComponentType.DATA)],
             services=[Service(name='svc1', bom_ref='svc1')],
-            data_flows=[DataFlowEdge(bom_ref='df-1', source='svc1', target='comp-data', data_ref='comp-data')],
+            data_flows=[DataFlowEdge(bom_ref='df-1', source='svc1', target='comp-data', data_refs=['comp-data'])],
+            properties=_graph_props(),
         )
         msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'dataRef' in m]
         self.assertTrue(any('component bom-ref' in m for m in msgs), msgs)
@@ -138,11 +188,32 @@ class TestAibomSemanticValidator(TestCase):
                 unrelated,
             ],
             data_flows=[
-                DataFlowEdge(bom_ref='df-1', source='left', target='right', data_ref='data-pii'),
+                DataFlowEdge(bom_ref='df-1', source='left', target='right', data_refs=['data-pii']),
             ],
+            properties=_graph_props(),
         )
         msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'dataRef' in m]
         self.assertTrue(any('source or target service' in m for m in msgs), msgs)
+
+    def test_data_ref_owned_by_non_endpoint_service_with_inline_data_is_warning(self) -> None:
+        unrelated = Service(
+            name='unrelated', bom_ref='unrelated',
+            data=[DataClassification(flow=ServiceDataFlow.OUTBOUND, classification='PII', bom_ref='data-pii')],
+        )
+        bom = Bom(
+            services=[Service(name='left', bom_ref='left'), Service(name='right', bom_ref='right'), unrelated],
+            data_flows=[
+                DataFlowEdge(
+                    bom_ref='df-1', source='left', target='right', data_refs=['data-pii'],
+                    data=[DataClassification(flow=ServiceDataFlow.UNKNOWN, classification='PII', bom_ref='edge-pii')],
+                ),
+            ],
+            properties=_graph_props(),
+        )
+        warnings = [m for sev, m in _findings_with(bom) if sev == 'warning' and 'dataRef' in m]
+        errors = [m for sev, m in _findings_with(bom) if sev == 'error' and 'dataRef' in m]
+        self.assertTrue(any('source or target service' in m for m in warnings), warnings)
+        self.assertEqual([], errors)
 
     def test_invalid_operation_is_error(self) -> None:
         edge = DataFlowEdge(bom_ref='df-1', source='comp1', target='svc1')
@@ -151,6 +222,7 @@ class TestAibomSemanticValidator(TestCase):
             components=[Component(name='comp1', bom_ref='comp1')],
             services=[Service(name='svc1', bom_ref='svc1')],
             data_flows=[edge],
+            properties=_graph_props(),
         )
         msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'operation' in m]
         self.assertTrue(any('merge' in m for m in msgs), msgs)
@@ -160,6 +232,7 @@ class TestAibomSemanticValidator(TestCase):
             components=[Component(name='c', bom_ref='c')],
             data_flows=[DataFlowEdge(bom_ref='df-1', source='c', target='c')],
             trust_zones=[TrustZone(name='a', default=True), TrustZone(name='b', default=True)],
+            properties=_graph_props(Property(name=AIBOM_PROP_TRUST_PERSPECTIVE, value='producer')),
         )
         msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'default' in m]
         self.assertTrue(len(msgs) > 0, msgs)
@@ -170,47 +243,141 @@ class TestAibomSemanticValidator(TestCase):
             services=[Service(name='svc', bom_ref='svc')],
             trust_zones=[TrustZone(name='internal-vpc')],
             data_flows=[DataFlowEdge(bom_ref='df', source='c', target='svc')],
+            properties=_graph_props(Property(name=AIBOM_PROP_TRUST_PERSPECTIVE, value='producer')),
         )
         msgs = [m for sev, m in _findings_with(bom) if sev == 'warning' and 'ghost-zone' in m]
         self.assertTrue(len(msgs) > 0, msgs)
 
-    def test_profile_without_data_flows_is_error(self) -> None:
-        bom = Bom(
-            components=[Component(name='c', bom_ref='c')],
-            properties=[Property(name='aibom:profile', value='core')],
-        )
-        msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'profile' in m]
-        self.assertTrue(len(msgs) > 0, msgs)
-
-    def test_missing_spec_version_is_info(self) -> None:
+    def test_missing_graph_self_description_axes_are_errors(self) -> None:
         bom = Bom(
             components=[Component(name='c', bom_ref='c')],
             services=[Service(name='svc', bom_ref='svc')],
             data_flows=[DataFlowEdge(bom_ref='df-1', source='c', target='svc')],
         )
-        msgs = [m for sev, m in _findings_with(bom) if sev == 'info' and 'aibom:specVersion' in m]
-        self.assertTrue(len(msgs) > 0, msgs)
+        msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'Graph Self-Description' in m]
+        self.assertEqual(4, len(msgs), msgs)
 
-    def test_missing_profile_is_info(self) -> None:
+    def test_invalid_completeness_is_error(self) -> None:
         bom = Bom(
             components=[Component(name='c', bom_ref='c')],
             services=[Service(name='svc', bom_ref='svc')],
             data_flows=[DataFlowEdge(bom_ref='df-1', source='c', target='svc')],
+            properties=[
+                Property(name=AIBOM_PROP_GRAPH_TYPE, value='system-structure'),
+                Property(name=AIBOM_PROP_GENERATION_METHOD, value='declared'),
+                Property(name=AIBOM_PROP_SCOPE, value='ai-system'),
+                Property(name=AIBOM_PROP_COMPLETENESS, value='complete-for-declared-scope'),
+            ],
         )
-        msgs = [m for sev, m in _findings_with(bom) if sev == 'info' and 'aibom:profile' in m]
-        self.assertTrue(len(msgs) > 0, msgs)
+        msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'completeness' in m]
+        self.assertTrue(any('complete-for-declared-scope' in m for m in msgs), msgs)
 
-    def test_regular_bom_has_no_discovery_property_info(self) -> None:
-        findings = AibomSemanticValidator.validate_bom(Bom(components=[Component(name='c', bom_ref='c')]))
-        msgs = [f.message for f in findings if f.severity == AibomSeverity.INFO]
+    def test_self_description_without_edges_is_error(self) -> None:
+        bom = Bom(
+            components=[Component(name='c', bom_ref='c')],
+            properties=_graph_props(),
+        )
+        msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'dataflow edge' in m]
+        self.assertTrue(msgs, msgs)
+
+    def test_trust_zones_without_dataflows_do_not_trigger_graph_axis_errors(self) -> None:
+        bom = Bom(trust_zones=[TrustZone(name='internal')])
+        msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'Graph Self-Description' in m]
         self.assertEqual([], msgs)
 
-    def test_unreferenced_metadata_component_trust_zone_has_no_discovery_property_info(self) -> None:
-        bom = Bom(metadata=BomMetaData(
-            component=Component(name='system', bom_ref='system', trust_zone='internal-vpc'),
-        ))
-        findings = AibomSemanticValidator.validate_bom(bom)
-        msgs = [f.message for f in findings if f.severity == AibomSeverity.INFO]
+    def test_missing_trust_perspective_is_warning_when_trust_zones_used(self) -> None:
+        bom = Bom(
+            components=[Component(name='c', bom_ref='c', trust_zone='internal')],
+            data_flows=[DataFlowEdge(bom_ref='df-1', source='c', target='c')],
+            trust_zones=[TrustZone(name='internal')],
+            properties=_graph_props(),
+        )
+        msgs = [m for sev, m in _findings_with(bom) if sev == 'warning' and 'trustPerspective' in m]
+        self.assertTrue(msgs, msgs)
+
+    def test_empty_trust_perspective_is_error(self) -> None:
+        bom = Bom(
+            components=[Component(name='c', bom_ref='c')],
+            services=[Service(name='svc', bom_ref='svc')],
+            data_flows=[DataFlowEdge(bom_ref='df-1', source='c', target='svc')],
+            properties=_graph_props(Property(name=AIBOM_PROP_TRUST_PERSPECTIVE, value=' ')),
+        )
+        msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'trustPerspective' in m]
+        self.assertTrue(msgs, msgs)
+
+    def test_invalid_system_relationship_is_error(self) -> None:
+        component = Component(
+            name='c', bom_ref='c',
+            properties=[Property(name=AIBOM_PROP_SYSTEM_RELATIONSHIP, value='owned')],
+        )
+        bom = Bom(
+            components=[component],
+            services=[Service(name='svc', bom_ref='svc')],
+            data_flows=[DataFlowEdge(bom_ref='df-1', source='c', target='svc')],
+            properties=_graph_props(),
+        )
+        msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'systemRelationship' in m]
+        self.assertTrue(any('owned' in m for m in msgs), msgs)
+
+    def test_boundary_crossing_ai_system_without_relationship_is_warning(self) -> None:
+        service = Service(name='svc', bom_ref='svc', x_trust_boundary=True)
+        bom = Bom(
+            components=[Component(name='c', bom_ref='c')],
+            services=[service],
+            data_flows=[DataFlowEdge(bom_ref='df-1', source='c', target='svc')],
+            properties=_graph_props(),
+        )
+        msgs = [m for sev, m in _findings_with(bom) if sev == 'warning' and 'systemRelationship' in m]
+        self.assertTrue(msgs, msgs)
+
+    def test_model_serving_service_requires_model_ref(self) -> None:
+        service = Service(
+            name='model-api', bom_ref='model-api',
+            properties=[Property(name=AIBOM_PROP_SERVICE_ROLE, value=AIBOM_SERVICE_ROLE_MODEL_SERVING)],
+        )
+        bom = Bom(
+            components=[Component(name='c', bom_ref='c')],
+            services=[service],
+            data_flows=[DataFlowEdge(bom_ref='df-1', source='c', target='model-api')],
+            properties=_graph_props(),
+        )
+        msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'modelRef' in m]
+        self.assertTrue(msgs, msgs)
+
+    def test_model_serving_service_model_ref_must_resolve_to_ml_model_component(self) -> None:
+        service = Service(
+            name='model-api', bom_ref='model-api',
+            properties=[
+                Property(name=AIBOM_PROP_SERVICE_ROLE, value=AIBOM_SERVICE_ROLE_MODEL_SERVING),
+                Property(name=AIBOM_PROP_MODEL_REF, value='not-model'),
+            ],
+        )
+        bom = Bom(
+            components=[Component(name='not-model', bom_ref='not-model', type=ComponentType.APPLICATION)],
+            services=[service],
+            data_flows=[DataFlowEdge(bom_ref='df-1', source='not-model', target='model-api')],
+            properties=_graph_props(),
+        )
+        msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'machine-learning-model' in m]
+        self.assertTrue(msgs, msgs)
+
+    def test_model_serving_service_valid_model_ref_has_no_model_ref_error(self) -> None:
+        model = Component(name='Claude Sonnet', bom_ref='claude-sonnet', type=ComponentType.MACHINE_LEARNING_MODEL)
+        service = Service(
+            name='model-api', bom_ref='model-api',
+            properties=[
+                Property(name=AIBOM_PROP_SERVICE_ROLE, value=AIBOM_SERVICE_ROLE_MODEL_SERVING),
+                Property(name=AIBOM_PROP_MODEL_REF, value='claude-sonnet'),
+                Property(name=AIBOM_PROP_SYSTEM_RELATIONSHIP, value='external'),
+            ],
+        )
+        bom = Bom(
+            components=[model, Component(name='client', bom_ref='client')],
+            services=[service],
+            data_flows=[DataFlowEdge(bom_ref='df-1', source='client', target='model-api')],
+            properties=_graph_props(),
+        )
+        msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'modelRef' in m]
         self.assertEqual([], msgs)
 
     def test_flow_mismatch_inbound_at_source_is_warning(self) -> None:
@@ -222,8 +389,9 @@ class TestAibomSemanticValidator(TestCase):
             components=[Component(name='c', bom_ref='c')],
             services=[svc],
             data_flows=[
-                DataFlowEdge(bom_ref='df-1', source='svc1', target='c', data_ref='data-pii'),
+                DataFlowEdge(bom_ref='df-1', source='svc1', target='c', data_refs=['data-pii']),
             ],
+            properties=_graph_props(),
         )
         msgs = [m for sev, m in _findings_with(bom) if sev == 'warning' and 'flow' in m]
         self.assertTrue(len(msgs) > 0, msgs)
@@ -237,8 +405,9 @@ class TestAibomSemanticValidator(TestCase):
             components=[Component(name='c', bom_ref='c')],
             services=[svc],
             data_flows=[
-                DataFlowEdge(bom_ref='df-1', source='c', target='svc1', data_ref='data-pii'),
+                DataFlowEdge(bom_ref='df-1', source='c', target='svc1', data_refs=['data-pii']),
             ],
+            properties=_graph_props(),
         )
         msgs = [m for sev, m in _findings_with(bom) if sev == 'warning' and 'flow' in m]
         self.assertTrue(len(msgs) > 0, msgs)
@@ -251,12 +420,9 @@ class TestAibomSemanticValidator(TestCase):
         bom = Bom(
             services=[svc],
             data_flows=[
-                DataFlowEdge(bom_ref='df-1', source='svc1', target='svc1', data_ref='data-pii'),
+                DataFlowEdge(bom_ref='df-1', source='svc1', target='svc1', data_refs=['data-pii']),
             ],
-            properties=[
-                Property(name='aibom:specVersion', value='0.1-draft'),
-                Property(name='aibom:profile', value='classified'),
-            ],
+            properties=_graph_props(),
         )
         msgs = [m for sev, m in _findings_with(bom) if sev == 'warning' and 'flow' in m]
         self.assertEqual([], msgs)
@@ -267,6 +433,7 @@ class TestAibomSemanticValidator(TestCase):
             metadata=metadata,
             services=[Service(name='svc', bom_ref='svc')],
             data_flows=[DataFlowEdge(bom_ref='df-1', source='system', target='svc')],
+            properties=_graph_props(),
         )
         msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'source' in m]
         self.assertFalse(msgs, msgs)
@@ -280,6 +447,7 @@ class TestAibomSemanticValidator(TestCase):
             metadata=metadata,
             services=[Service(name='svc', bom_ref='svc')],
             data_flows=[DataFlowEdge(bom_ref='df-1', source='system-child', target='svc')],
+            properties=_graph_props(),
         )
         msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'source' in m]
         self.assertFalse(msgs, msgs)
@@ -294,6 +462,7 @@ class TestAibomSemanticValidator(TestCase):
             ],
             services=[Service(name='svc', bom_ref='svc')],
             data_flows=[DataFlowEdge(bom_ref='df-1', source='actual', target='svc')],
+            properties=_graph_props(),
         )
         msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'duplicate bom-ref' in m]
         self.assertFalse(msgs, msgs)
@@ -303,7 +472,48 @@ class TestAibomSemanticValidator(TestCase):
         bom = Bom(
             metadata=metadata,
             services=[Service(name='svc', bom_ref='svc')],
-            data_flows=[DataFlowEdge(bom_ref='df-1', source='svc', target='svc', data_ref='system')],
+            data_flows=[DataFlowEdge(bom_ref='df-1', source='svc', target='svc', data_refs=['system'])],
+            properties=_graph_props(),
         )
         msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'dataRef' in m]
         self.assertTrue(any('component bom-ref' in m for m in msgs), msgs)
+
+    def test_property_encoded_core_graph_is_validated(self) -> None:
+        bom = Bom(
+            components=[Component(name='c', bom_ref='c')],
+            services=[Service(name='svc', bom_ref='svc')],
+            properties=_graph_props(
+                Property(name='aibom:dataFlow:df-1:source', value='c'),
+                Property(name='aibom:dataFlow:df-1:target', value='svc'),
+                Property(name='aibom:dataFlow:df-1:operation', value='read'),
+                Property(name='aibom:dataFlow:df-1:data:edge-data:classification', value='prompt'),
+                Property(name='aibom:dataFlow:df-1:data:edge-data:flow', value='unknown'),
+                Property(name='aibom:dataFlow:df-1:dataRef', value='edge-data'),
+            ),
+        )
+        errors = [m for sev, m in _findings_with(bom) if sev == 'error']
+        self.assertEqual([], errors)
+
+    def test_property_encoded_core_missing_endpoint_is_error(self) -> None:
+        bom = Bom(
+            components=[Component(name='c', bom_ref='c')],
+            services=[Service(name='svc', bom_ref='svc')],
+            properties=_graph_props(
+                Property(name='aibom:dataFlow:df-1:source', value='c'),
+            ),
+        )
+        msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'missing source or target' in m]
+        self.assertTrue(msgs, msgs)
+
+    def test_property_encoded_conflicting_endpoint_is_duplicate_edge_error(self) -> None:
+        bom = Bom(
+            components=[Component(name='c', bom_ref='c'), Component(name='d', bom_ref='d')],
+            services=[Service(name='svc', bom_ref='svc')],
+            properties=_graph_props(
+                Property(name='aibom:dataFlow:df-1:source', value='c'),
+                Property(name='aibom:dataFlow:df-1:source', value='d'),
+                Property(name='aibom:dataFlow:df-1:target', value='svc'),
+            ),
+        )
+        msgs = [m for sev, m in _findings_with(bom) if sev == 'error' and 'duplicate decoded Core' in m]
+        self.assertTrue(msgs, msgs)

@@ -20,11 +20,12 @@
 AIBOM System Structure model types.
 
 Implements the typed object model for the AIBOM System Structure specification
-(see ``docs/specs/aibom-system-structure-proposal.md``). The native fields are
+(see ``docs/specs/aibom-draft-v1.md``). The native fields are
 gated to ``SchemaVersion.V1_8`` only.
 """
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional, Union
 
@@ -33,11 +34,23 @@ from sortedcontainers import SortedSet
 
 from .._internal.bom_ref import bom_ref_from_str as _bom_ref_from_str
 from .._internal.compare import ComparableTuple as _ComparableTuple
-from . import Property
+from ..exception.serialization import SerializationOfUnexpectedValueException
+from . import DataClassification, Property
 from .bom_ref import BomRef
 
 AIBOM_SPEC_VERSION_DEFAULT = '0.1-draft'
 AIBOM_PROPERTY_PREFIX = 'aibom:'
+AIBOM_PROP_SPEC_VERSION = f'{AIBOM_PROPERTY_PREFIX}specVersion'
+AIBOM_PROP_ENCODING = f'{AIBOM_PROPERTY_PREFIX}encoding'
+AIBOM_PROP_GRAPH_TYPE = f'{AIBOM_PROPERTY_PREFIX}graphType'
+AIBOM_PROP_GENERATION_METHOD = f'{AIBOM_PROPERTY_PREFIX}generationMethod'
+AIBOM_PROP_SCOPE = f'{AIBOM_PROPERTY_PREFIX}scope'
+AIBOM_PROP_COMPLETENESS = f'{AIBOM_PROPERTY_PREFIX}completeness'
+AIBOM_PROP_TRUST_PERSPECTIVE = f'{AIBOM_PROPERTY_PREFIX}trustPerspective'
+AIBOM_PROP_SYSTEM_RELATIONSHIP = f'{AIBOM_PROPERTY_PREFIX}systemRelationship'
+AIBOM_PROP_MODEL_REF = f'{AIBOM_PROPERTY_PREFIX}modelRef'
+AIBOM_PROP_SERVICE_ROLE = f'{AIBOM_PROPERTY_PREFIX}serviceRole'
+AIBOM_SERVICE_ROLE_MODEL_SERVING = 'model-serving'
 
 
 class AibomEncoding(str, Enum):
@@ -46,12 +59,79 @@ class AibomEncoding(str, Enum):
     PROPERTIES = 'properties'
 
 
-class AibomProfile(str, Enum):
-    """AIBOM conformance profile, per AIBOM System Structure specification, section 3.2."""
-    CORE = 'core'
-    CLASSIFIED = 'classified'
-    ZONED = 'zoned'
-    FULL = 'full'
+class AibomCompleteness(str, Enum):
+    """AIBOM completeness values aligned with CycloneDX aggregateType semantics."""
+    COMPLETE = 'complete'
+    INCOMPLETE = 'incomplete'
+    INCOMPLETE_FIRST_PARTY_ONLY = 'incomplete_first_party_only'
+    INCOMPLETE_FIRST_PARTY_PROPRIETARY_ONLY = 'incomplete_first_party_proprietary_only'
+    INCOMPLETE_FIRST_PARTY_OPENSOURCE_ONLY = 'incomplete_first_party_opensource_only'
+    INCOMPLETE_THIRD_PARTY_ONLY = 'incomplete_third_party_only'
+    INCOMPLETE_THIRD_PARTY_PROPRIETARY_ONLY = 'incomplete_third_party_proprietary_only'
+    INCOMPLETE_THIRD_PARTY_OPENSOURCE_ONLY = 'incomplete_third_party_opensource_only'
+    UNKNOWN = 'unknown'
+    NOT_SPECIFIED = 'not_specified'
+
+
+class AibomSystemRelationship(str, Enum):
+    """Scope-relative system membership values for ``aibom:systemRelationship``."""
+    CONSTITUENT = 'constituent'
+    EXTERNAL = 'external'
+
+
+def _require_non_empty_string(field: str, value: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f'{field} must be a non-empty string')
+    return value
+
+
+@dataclass(frozen=True)
+class AibomGraphSelfDescription:
+    """Required Graph Self-Description axes for an AIBOM graph, per draft A1."""
+    graph_type: str
+    generation_method: str
+    scope: str
+    completeness: AibomCompleteness
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, 'graph_type', _require_non_empty_string('graph_type', self.graph_type))
+        object.__setattr__(
+            self, 'generation_method',
+            _require_non_empty_string('generation_method', self.generation_method),
+        )
+        object.__setattr__(self, 'scope', _require_non_empty_string('scope', self.scope))
+
+    def as_properties(self) -> list[Property]:
+        return [
+            Property(name=AIBOM_PROP_GRAPH_TYPE, value=self.graph_type),
+            Property(name=AIBOM_PROP_GENERATION_METHOD, value=self.generation_method),
+            Property(name=AIBOM_PROP_SCOPE, value=self.scope),
+            Property(name=AIBOM_PROP_COMPLETENESS, value=self.completeness.value),
+        ]
+
+    @classmethod
+    def from_properties(cls, properties: Iterable[Property]) -> 'AibomGraphSelfDescription':
+        values = {
+            p.name: _require_non_empty_string(p.name, p.value)
+            for p in properties
+            if p.value is not None
+        }
+        missing = [
+            name for name in (
+                AIBOM_PROP_GRAPH_TYPE,
+                AIBOM_PROP_GENERATION_METHOD,
+                AIBOM_PROP_SCOPE,
+                AIBOM_PROP_COMPLETENESS,
+            ) if name not in values
+        ]
+        if missing:
+            raise ValueError(f'AIBOM Graph Self-Description is missing: {", ".join(missing)}')
+        return cls(
+            graph_type=values[AIBOM_PROP_GRAPH_TYPE],
+            generation_method=values[AIBOM_PROP_GENERATION_METHOD],
+            scope=values[AIBOM_PROP_SCOPE],
+            completeness=AibomCompleteness(values[AIBOM_PROP_COMPLETENESS]),
+        )
 
 
 class _XsdBoolean(serializable.helpers.BaseHelper):
@@ -102,6 +182,27 @@ class _XsdBoolean(serializable.helpers.BaseHelper):
             if v in ('false', '0'):
                 return False
         raise ValueError(f'Cannot deserialize xs:boolean from: {o!r}')
+
+
+class _BomRefRepositorySerializationHelper(serializable.helpers.BaseHelper):
+    """  THIS CLASS IS NON-PUBLIC API  """
+
+    @classmethod
+    def serialize(cls, o: Any) -> list[str]:
+        if isinstance(o, (SortedSet, set, list, tuple)):
+            return [str(i) for i in o]
+        raise SerializationOfUnexpectedValueException(
+            f'Attempt to serialize a non-BomRef collection: {o!r}')
+
+    @classmethod
+    def deserialize(cls, o: Any) -> 'SortedSet[BomRef]':
+        refs: 'SortedSet[BomRef]' = SortedSet()
+        if isinstance(o, list):
+            for v in o:
+                ref = _bom_ref_from_str(v, optional=True)
+                if ref is not None:
+                    refs.add(ref)
+        return refs
 
 
 @serializable.serializable_enum
@@ -227,16 +328,21 @@ class DataFlowEdge:
         source: Union[str, BomRef],
         target: Union[str, BomRef],
         operations: Optional[Iterable[DataFlowOperation]] = None,
+        data_refs: Optional[Iterable[Union[str, BomRef]]] = None,
         data_ref: Optional[Union[str, BomRef]] = None,
+        data: Optional[Iterable[DataClassification]] = None,
         name: Optional[str] = None,
         description: Optional[str] = None,
         properties: Optional[Iterable[Property]] = None,
     ) -> None:
+        if data_ref is not None and data_refs is not None:
+            raise ValueError('DataFlowEdge cannot receive both data_ref and data_refs')
         self._bom_ref = self._require_ref('bom_ref', bom_ref)
         self._source = self._require_ref('source', source)
         self._target = self._require_ref('target', target)
         self.operations = operations or []
-        self.data_ref = data_ref
+        self.data_refs = [data_ref] if data_ref is not None else data_refs or []
+        self.data = data or []
         self.name = name
         self.description = description
         self.properties = properties or []
@@ -318,27 +424,45 @@ class DataFlowEdge:
         self._operations = SortedSet(operations)
 
     @property
-    @serializable.json_name('dataRef')
-    @serializable.type_mapping(BomRef)
-    @serializable.xml_name('dataRef')
+    @serializable.json_name('dataRefs')
+    @serializable.type_mapping(_BomRefRepositorySerializationHelper)
+    @serializable.xml_array(serializable.XmlArraySerializationType.NESTED, 'dataRef')
     @serializable.xml_sequence(4)
-    def data_ref(self) -> Optional[BomRef]:
+    def data_refs(self) -> 'SortedSet[BomRef]':
         """
-        BOM reference of a data descriptor for the payload on this edge. Resolves
-        to a `serviceData.bom-ref` on either endpoint. Omitted when no specific
-        descriptor applies.
+        BOM references of data descriptors for payloads on this edge. Each
+        reference resolves to endpoint service data or inline edge data.
 
         Returns:
-            `BomRef` if set else `None`
+            Set of `BomRef`
         """
-        return self._data_ref
+        return self._data_refs
 
-    @data_ref.setter
-    def data_ref(self, data_ref: Optional[Union[str, BomRef]]) -> None:
-        self._data_ref = _bom_ref_from_str(data_ref, optional=True)
+    @data_refs.setter
+    def data_refs(self, data_refs: Iterable[Union[str, BomRef]]) -> None:
+        refs: 'SortedSet[BomRef]' = SortedSet()
+        for data_ref in data_refs:
+            refs.add(self._require_ref('data_refs', data_ref))
+        self._data_refs = refs
 
     @property
+    @serializable.xml_array(serializable.XmlArraySerializationType.NESTED, 'data')
     @serializable.xml_sequence(5)
+    def data(self) -> 'SortedSet[DataClassification]':
+        """
+        Inline data descriptors for payloads on this edge.
+
+        Returns:
+            Set of `DataClassification`
+        """
+        return self._data
+
+    @data.setter
+    def data(self, data: Iterable[DataClassification]) -> None:
+        self._data = SortedSet(data)
+
+    @property
+    @serializable.xml_sequence(6)
     @serializable.xml_string(serializable.XmlStringSerializationType.NORMALIZED_STRING)
     def name(self) -> Optional[str]:
         """
@@ -354,7 +478,7 @@ class DataFlowEdge:
         self._name = name
 
     @property
-    @serializable.xml_sequence(6)
+    @serializable.xml_sequence(7)
     @serializable.xml_string(serializable.XmlStringSerializationType.NORMALIZED_STRING)
     def description(self) -> Optional[str]:
         """
@@ -371,7 +495,7 @@ class DataFlowEdge:
 
     @property
     @serializable.xml_array(serializable.XmlArraySerializationType.NESTED, 'property')
-    @serializable.xml_sequence(7)
+    @serializable.xml_sequence(8)
     def properties(self) -> 'SortedSet[Property]':
         """
         Extension properties for this dataflow edge.
@@ -391,7 +515,8 @@ class DataFlowEdge:
             self._source.value,
             self._target.value,
             _ComparableTuple(self._operations),
-            self._data_ref.value if self._data_ref is not None else None,
+            _ComparableTuple(self._data_refs),
+            _ComparableTuple(self._data),
             self.name, self.description,
             _ComparableTuple(self._properties),
         ))

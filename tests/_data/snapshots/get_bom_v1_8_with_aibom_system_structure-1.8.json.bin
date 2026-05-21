@@ -16,19 +16,31 @@
   "dataFlows": [
     {
       "bom-ref": "df-filter-to-llm",
-      "name": "Filtered input to LLM",
+      "data": [
+        {
+          "bom-ref": "data-filtered-prompt",
+          "classification": "prompt",
+          "flow": "unknown"
+        }
+      ],
+      "dataRefs": [
+        "data-filtered-prompt"
+      ],
+      "name": "Filtered input to hosted model endpoint",
       "source": "input-filter",
-      "target": "claude-sonnet"
+      "target": "anthropic-claude-api"
     },
     {
       "bom-ref": "df-kb-to-llm",
-      "dataRef": "data-kb-pifi",
+      "dataRefs": [
+        "data-kb-pifi"
+      ],
       "name": "Knowledge base results",
       "operations": [
         "read"
       ],
       "source": "knowledge-base",
-      "target": "claude-sonnet"
+      "target": "anthropic-claude-api"
     },
     {
       "bom-ref": "df-llm-to-kb",
@@ -37,12 +49,14 @@
         "execute",
         "write"
       ],
-      "source": "claude-sonnet",
+      "source": "anthropic-claude-api",
       "target": "knowledge-base"
     },
     {
       "bom-ref": "df-user-to-filter",
-      "dataRef": "data-user-pii",
+      "dataRefs": [
+        "data-user-pii"
+      ],
       "name": "User message to input filter",
       "operations": [
         "read"
@@ -52,6 +66,9 @@
     }
   ],
   "dependencies": [
+    {
+      "ref": "anthropic-claude-api"
+    },
     {
       "ref": "claude-sonnet"
     },
@@ -70,6 +87,26 @@
   },
   "properties": [
     {
+      "name": "aibom:completeness",
+      "value": "unknown"
+    },
+    {
+      "name": "aibom:generationMethod",
+      "value": "declared"
+    },
+    {
+      "name": "aibom:graphType",
+      "value": "system-structure"
+    },
+    {
+      "name": "aibom:scope",
+      "value": "ai-system"
+    },
+    {
+      "name": "aibom:trustPerspective",
+      "value": "producer"
+    },
+    {
       "name": "key1",
       "value": "val1"
     },
@@ -80,6 +117,29 @@
   ],
   "serialNumber": "urn:uuid:1441d33a-e0fc-45b5-af3b-61ee52a88bac",
   "services": [
+    {
+      "bom-ref": "anthropic-claude-api",
+      "endpoints": [
+        "https://api.anthropic.com/v1/messages"
+      ],
+      "name": "anthropic-claude-api",
+      "properties": [
+        {
+          "name": "aibom:modelRef",
+          "value": "claude-sonnet"
+        },
+        {
+          "name": "aibom:serviceRole",
+          "value": "model-serving"
+        },
+        {
+          "name": "aibom:systemRelationship",
+          "value": "external"
+        }
+      ],
+      "trustZone": "public-internet",
+      "x-trust-boundary": true
+    },
     {
       "bom-ref": "knowledge-base",
       "data": [

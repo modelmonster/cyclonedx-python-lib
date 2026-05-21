@@ -1,6 +1,10 @@
 # Exclude coverage
 test-reports
 
+# Simplebroker/weft
+.weft/
+.broker.*
+
 # Exlude IDE related files
 .idea/*
 .vscode/*

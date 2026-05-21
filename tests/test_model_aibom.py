@@ -19,7 +19,18 @@ from unittest import TestCase
 
 from sortedcontainers import SortedSet
 
-from cyclonedx.model.aibom import DataFlowEdge, DataFlowOperation, TrustZone
+from cyclonedx.model import DataClassification, DataFlow as ServiceDataFlow, Property
+from cyclonedx.model.aibom import (
+    AIBOM_PROP_COMPLETENESS,
+    AIBOM_PROP_GENERATION_METHOD,
+    AIBOM_PROP_GRAPH_TYPE,
+    AIBOM_PROP_SCOPE,
+    AibomCompleteness,
+    AibomGraphSelfDescription,
+    DataFlowEdge,
+    DataFlowOperation,
+    TrustZone,
+)
 from cyclonedx.model.bom_ref import BomRef
 
 
@@ -58,6 +69,40 @@ class TestTrustZone(TestCase):
         self.assertEqual(3, len(SortedSet((a, b, c))))
 
 
+class TestAibomGraphSelfDescription(TestCase):
+
+    def test_as_properties(self) -> None:
+        desc = AibomGraphSelfDescription(
+            graph_type='system-structure',
+            generation_method='declared',
+            scope='ai-system',
+            completeness=AibomCompleteness.UNKNOWN,
+        )
+        props = {p.name: p.value for p in desc.as_properties()}
+        self.assertEqual('system-structure', props[AIBOM_PROP_GRAPH_TYPE])
+        self.assertEqual('declared', props[AIBOM_PROP_GENERATION_METHOD])
+        self.assertEqual('ai-system', props[AIBOM_PROP_SCOPE])
+        self.assertEqual('unknown', props[AIBOM_PROP_COMPLETENESS])
+
+    def test_from_properties(self) -> None:
+        desc = AibomGraphSelfDescription.from_properties([
+            Property(name=AIBOM_PROP_GRAPH_TYPE, value='system-structure'),
+            Property(name=AIBOM_PROP_GENERATION_METHOD, value='observed'),
+            Property(name=AIBOM_PROP_SCOPE, value='workflow'),
+            Property(name=AIBOM_PROP_COMPLETENESS, value='complete'),
+        ])
+        self.assertEqual(AibomCompleteness.COMPLETE, desc.completeness)
+
+    def test_rejects_empty_axes(self) -> None:
+        with self.assertRaises(ValueError):
+            AibomGraphSelfDescription(
+                graph_type='',
+                generation_method='declared',
+                scope='ai-system',
+                completeness=AibomCompleteness.UNKNOWN,
+            )
+
+
 class TestDataFlowEdge(TestCase):
 
     def test_minimal_edge(self) -> None:
@@ -66,23 +111,35 @@ class TestDataFlowEdge(TestCase):
         self.assertEqual('a', e.source.value)
         self.assertEqual('b', e.target.value)
         self.assertEqual(0, len(e.operations))
-        self.assertIsNone(e.data_ref)
+        self.assertEqual(0, len(e.data_refs))
+        self.assertEqual(0, len(e.data))
         self.assertIsNone(e.name)
 
-    def test_with_operations_and_data_ref(self) -> None:
+    def test_with_operations_data_refs_and_inline_data(self) -> None:
         e = DataFlowEdge(
             bom_ref='df-1', source='a', target='b',
             operations=[DataFlowOperation.WRITE, DataFlowOperation.EXECUTE],
-            data_ref='data-1', name='label',
+            data_refs=['data-1', 'data-2'],
+            data=[DataClassification(flow=ServiceDataFlow.UNKNOWN, classification='prompt', bom_ref='edge-data')],
+            name='label',
         )
         self.assertEqual({DataFlowOperation.WRITE, DataFlowOperation.EXECUTE}, set(e.operations))
-        self.assertEqual('data-1', e.data_ref.value)
+        self.assertEqual({'data-1', 'data-2'}, {r.value for r in e.data_refs})
+        self.assertEqual({'edge-data'}, {d.bom_ref.value for d in e.data if d.bom_ref is not None})
         self.assertEqual('label', e.name)
+
+    def test_singular_data_ref_is_python_only_alias(self) -> None:
+        e = DataFlowEdge(bom_ref='df-1', source='a', target='b', data_ref='data-1')
+        self.assertEqual({'data-1'}, {r.value for r in e.data_refs})
+
+    def test_data_ref_and_data_refs_are_mutually_exclusive(self) -> None:
+        with self.assertRaises(ValueError):
+            DataFlowEdge(bom_ref='df-1', source='a', target='b', data_ref='x', data_refs=['y'])
 
     def test_required_refs_reject_empty(self) -> None:
         for arg in ('bom_ref', 'source', 'target'):
             with self.assertRaises(ValueError):
-                DataFlowEdge(**{**{'bom_ref': 'x', 'source': 'a', 'target': 'b'}, arg: ''})
+                DataFlowEdge(**{**{'bom_ref': 'x', 'source': 'a', 'target': 'b'}, arg: ''})  # type: ignore[arg-type]
 
     def test_required_refs_reject_blank_bom_ref(self) -> None:
         with self.assertRaises(ValueError):
@@ -94,7 +151,7 @@ class TestDataFlowEdge(TestCase):
 
     def test_optional_data_ref_stays_none(self) -> None:
         e = DataFlowEdge(bom_ref='df-1', source='a', target='b')
-        self.assertIsNone(e.data_ref)
+        self.assertEqual(0, len(e.data_refs))
 
     def test_equality_by_bom_ref(self) -> None:
         e1 = DataFlowEdge(bom_ref='df-1', source='a', target='b')

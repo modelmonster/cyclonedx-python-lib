@@ -2543,7 +2543,7 @@ limitations under the License.
                 </xs:attribute>
                 <xs:attribute name="bom-ref" type="bom:refType" use="optional">
                     <xs:annotation>
-                        <xs:documentation>An identifier for the data descriptor, used by AIBOM `dataFlows[].dataRef` to reference the specific payload. See AIBOM System Structure specification, section 6.5.</xs:documentation>
+                        <xs:documentation>An identifier for the data descriptor, used by AIBOM `dataFlows[].dataRefs[]` to reference the specific payload. See AIBOM System Structure specification, section 6.5.</xs:documentation>
                     </xs:annotation>
                 </xs:attribute>
             </xs:extension>
@@ -9826,10 +9826,25 @@ limitations under the License.
                     </xs:sequence>
                 </xs:complexType>
             </xs:element>
-            <xs:element name="dataRef" type="bom:refLinkType" minOccurs="0" maxOccurs="1">
+            <xs:element name="dataRefs" minOccurs="0" maxOccurs="1">
                 <xs:annotation>
-                    <xs:documentation>BOM reference of a data descriptor for the payload on this edge.</xs:documentation>
+                    <xs:documentation>BOM references of data descriptors for the payloads on this edge.</xs:documentation>
                 </xs:annotation>
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="dataRef" type="bom:refLinkType" minOccurs="1" maxOccurs="unbounded"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="data" minOccurs="0" maxOccurs="1">
+                <xs:annotation>
+                    <xs:documentation>Inline data descriptors carried directly on this dataflow edge.</xs:documentation>
+                </xs:annotation>
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="data" type="bom:dataClassificationType" minOccurs="1" maxOccurs="unbounded"/>
+                    </xs:sequence>
+                </xs:complexType>
             </xs:element>
             <xs:element name="name" type="xs:normalizedString" minOccurs="0" maxOccurs="1">
                 <xs:annotation>

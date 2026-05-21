@@ -2165,7 +2165,7 @@
         "bom-ref": {
           "$ref": "#/definitions/refType",
           "title": "BOM Reference",
-          "description": "An identifier for the data descriptor, used by AIBOM `dataFlows[].dataRef` to reference the specific payload. See AIBOM System Structure specification, section 6.5."
+          "description": "An identifier for the data descriptor, used by AIBOM `dataFlows[].dataRefs[]` to reference the specific payload. See AIBOM System Structure specification, section 6.5."
         },
         "flow": {
           "$ref": "#/definitions/dataFlowDirection",
@@ -6795,10 +6795,23 @@
           "title": "Operations",
           "description": "Operation types annotating the interaction context. Operations never determine, reverse, or override edge direction."
         },
-        "dataRef": {
-          "$ref": "#/definitions/refLinkType",
-          "title": "Data Reference",
-          "description": "BOM reference of a data descriptor for the payload on this edge. Resolves to a `serviceData.bom-ref` on either endpoint."
+        "dataRefs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/definitions/refLinkType"
+          },
+          "title": "Data References",
+          "description": "BOM references of data descriptors for the payloads on this edge. References resolve to endpoint `serviceData.bom-ref` descriptors or inline `data[]` descriptors on the same dataflow."
+        },
+        "data": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/definitions/serviceData"
+          },
+          "title": "Inline Data Descriptors",
+          "description": "Data descriptors carried directly on this dataflow edge."
         },
         "name": {
           "type": "string",

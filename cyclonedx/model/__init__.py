@@ -112,7 +112,7 @@ class DataClassification:
     @serializable.xml_name('bom-ref')
     def bom_ref(self) -> Optional[BomRef]:
         """
-        An optional identifier for this data descriptor. AIBOM `dataFlows[].dataRef` uses this `bom-ref`
+        An optional identifier for this data descriptor. AIBOM `dataFlows[].dataRefs[]` uses this `bom-ref`
         to reference the specific payload moving on an edge. Available from CycloneDX 1.8.
 
         Returns:
