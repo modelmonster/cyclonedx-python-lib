@@ -160,7 +160,7 @@
         "title": "Release Notes Title",
         "type": "major"
       },
-      "trustZone": "internal\tvpc",
+      "trustZone": "internal-vpc",
       "version": "1.2.3",
       "x-trust-boundary": true
     },
